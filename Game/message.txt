@@ -1,0 +1,2005 @@
+#include "iGraphics.h"
+#include <time.h>
+#include <string.h> // For string operations if needed
+#include <windows.h> // For PlaySound function //
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              CONSTANTS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+const int WINDOW_WIDTH = 900;
+const int WINDOW_HEIGHT = 600;
+const int JUMP_STRENGTH = 30;
+const int GRAVITY = 2;
+const int WALK_SPEED = 3;
+const int RUN_SPEED = 10;
+const int GROUND_Y = 36;
+const int CHARACTER_WIDTH = 96;
+const int CHARACTER_HEIGHT = 96;
+const int ENEMY_WIDTH = 96;
+const int ENEMY_HEIGHT = 96;
+const int ENEMY_SPEED = 4; // for faster enemies
+const int MAX_ENEMIES = 12; // accommodate more enemies
+const int HITS_TO_STUN = 1; // First hit stuns the enemy
+const int HITS_TO_KILL = 2; // Second hit kills the enemy
+const int ATTACK_RANGE = 15; // Reduced attack
+// -------------------------------------------------
+const int CHARACTER_MAX_HEALTH = 100; // Max health for character
+const int ENEMY_MAX_HEALTH = 100; // Max health for each enemy
+const int COLLISION_DAMAGE = 10; // 10% damage per collision
+const int ENEMIES_PER_LEVEL = 10; // Total enemies per level
+const int ENEMIES_PER_WAVE = 2;   // Enemies spawned per wave
+const int SKELETON_ATTACK_FRAMES = 12; // 000 to 011
+// --- Updated Troll Attack Frames ---
+const int TROLL_ATTACK_FRAMES = 10;    // 000 to 009
+// ----------------------------------
+const int ENEMY_ATTACK_COOLDOWN = 180; // Frames between enemy attacks (increased for balance)
+const int ENEMY_ATTACK_RANGE = 70;     // Horizontal attack range (Kept as before)
+const int ENEMY_ATTACK_DAMAGE = 8;      // Damage per enemy attack
+// --- Define minimum distance to maintain between enemy and character ---
+const int MIN_DISTANCE_TO_CHARACTER = (CHARACTER_WIDTH / 2 + ENEMY_WIDTH / 2 + 5) / 2; // Reduced distance
+// --- Predator Enemy Constants ---
+const int PREDATOR_ATTACK_FRAMES = 4; // 000 to 003
+const int PREDATOR_WALK_FRAMES = 9;   // 3 turn + 6 walk frames
+const int PREDATOR_DEATH_FRAMES = 5;  // 0022_dead_1 to 0022_dead_5
+// --------------------------------------------------------------------------------------
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              ENUMS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+enum CharacterState {
+	STATE_IDLE,
+	STATE_WALKING,
+	STATE_RUNNING,
+	STATE_JUMPING,
+	STATE_ATTACKING,
+	STATE_DYING,
+	STATE_DEATH_ANIM // New state for death animation sequence
+};
+enum Direction {
+	DIRECTION_RIGHT = 0,
+	DIRECTION_LEFT = 1
+};
+enum EnemyState {
+	ENEMY_WALKING,
+	ENEMY_STUNNED,
+	ENEMY_DYING,
+	ENEMY_ATTACKING // New state for enemy attacking
+};
+enum EnemyDirection {
+	ENEMY_DIRECTION_LEFT = 0,
+	ENEMY_DIRECTION_RIGHT = 1
+};
+enum EnemyType {
+	ENEMY_TYPE_SKELETON = 0,
+	ENEMY_TYPE_TROLL = 1,
+	ENEMY_TYPE_PREDATOR = 2 // New enemy type
+};
+enum GameLevel {
+	LEVEL_1 = 1,
+	LEVEL_2 = 2,
+	LEVEL_3 = 3 // New level
+};
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              STRUCTS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+struct GameState {
+	bool showMenu;
+	bool showInstructions;
+	bool showAbout;
+	bool gameStarted;
+	bool enemiesSpawned;
+	int enemiesKilled; // Enemies killed in current level
+	int nextEnemyToSpawn; // Index for next enemy to spawn
+	bool characterDead;
+	int characterHealth;
+	int currentLevel; // Track current level
+	int enemiesSpawnedInLevel; // Enemies spawned in current level
+	bool levelComplete; // Flag for level completion
+	bool awaitingLevelProgression; // Flag to prevent multiple SPACE presses
+	bool deathAnimationFinished; // Track if death animation is complete
+};
+struct Images {
+	// Menu images
+	int titleImage;
+	int playButtonImage, instructionsButtonImage, aboutButtonImage, exitButtonImage, clickImage;
+	int backGround;
+	int gameBackGround; // Will change based on level
+	int returnButtonImage;
+	// Character sprite arrays [direction][frame]
+	int idleSprite[2];
+	int walkSprites[2][8];
+	int runSprites[2][8];
+	int jumpSprites[2][12];
+	int attackSprites[2][5];
+	int dyingSprite[2]; // Character dying sprite (single frame)
+	int deathSprites[2][4]; // Character death animation sprites [direction][frame]
+	// Enemy sprites - Level 1 (Skeletons)
+	int enemyWalkSprites_L1[24]; // 24 walking frames (left-facing)
+	int enemyWalkSpritesRight_L1[24]; // 24 walking frames (right-facing)
+	int enemyStunnedSprite_L1; // Single stunned sprite
+	int enemyDyingSprites_L1[15]; // 15 dying frames
+	// Enemy attack sprites - Level 1 (Skeletons)
+	int enemyAttackSprites_L1[SKELETON_ATTACK_FRAMES];       // Left-facing
+	int enemyAttackSpritesRight_L1[SKELETON_ATTACK_FRAMES];  // Right-facing
+	// Enemy sprites - Level 2 (Trolls)
+	// --- Updated Troll Sprite Arrays (000-009) ---
+	int enemyWalkSprites_L2[10]; // 10 walking frames (left-facing) 000L to 009L
+	int enemyWalkSpritesRight_L2[10]; // 10 walking frames (right-facing) 000 to 009
+	int enemyStunnedSprite_L2_Left; // Single stunned sprite (left-facing)
+	int enemyStunnedSprite_L2_Right; // Single stunned sprite (right-facing)
+	int enemyDyingSprites_L2_Left[10]; // 10 dying frames (left-facing) 000L to 009L
+	int enemyDyingSprites_L2_Right[10]; // 10 dying frames (right-facing) 000 to 009
+	// Enemy attack sprites - Level 2 (Trolls)
+	int enemyAttackSprites_L2[TROLL_ATTACK_FRAMES];       // Left-facing 000L to 009L
+	int enemyAttackSpritesRight_L2[TROLL_ATTACK_FRAMES];   // Right-facing 000 to 009
+	// ----------------------------------
+	// Enemy sprites - Level 3 (Predators)
+	int enemyIdleSprite_L3_Left; // Single idle sprite (left-facing)
+	int enemyIdleSprite_L3_Right; // Single idle sprite (right-facing)
+	int enemyWalkSprites_L3[PREDATOR_WALK_FRAMES]; // 9 walking frames (left-facing)
+	int enemyWalkSpritesRight_L3[PREDATOR_WALK_FRAMES]; // 9 walking frames (right-facing)
+	// int enemyDyingSprites_L3_Left[10]; // 10 dying frames (left-facing) - assuming same as troll for now - Not used for predator
+	// int enemyDyingSprites_L3_Right[10]; // 10 dying frames (right-facing) - assuming same as troll for now - Not used for predator
+	// Enemy death sprites - Level 3 (Predators)
+	int enemyDeathSprites_L3_Left[PREDATOR_DEATH_FRAMES]; // 5 death frames (0022_dead_1L to 0022_dead_5L)
+	int enemyDeathSprites_L3_Right[PREDATOR_DEATH_FRAMES]; // 5 death frames (0022_dead_1 to 0022_dead_5)
+	// Enemy attack sprites - Level 3 (Predators)
+	int enemyAttackSprites_L3[PREDATOR_ATTACK_FRAMES];       // Left-facing 000L to 003L
+	int enemyAttackSpritesRight_L3[PREDATOR_ATTACK_FRAMES];   // Right-facing 000 to 003
+};
+struct Character {
+	// Position and size
+	int x;
+	int y;
+	int width;
+	int height;
+	// Movement properties
+	int walkSpeed;
+	int runSpeed;
+	int facingDirection;
+	// Movement states
+	bool moveLeft;
+	bool moveRight;
+	bool isRunning;
+	bool isJumping;
+	bool isAttacking;
+	bool onGround;
+	bool isDead;
+	// Animation properties
+	CharacterState currentState;
+	int currentFrame;
+	int animationCounter;
+	int animationSpeed;
+	// Attack animation
+	int attackFrame;
+	int attackAnimationCounter;
+	int attackAnimationSpeed;
+	// Jump physics
+	int jumpVelocity;
+	int jumpFrame;
+	// Health
+	int health;
+	bool collisionCooldown;
+	int collisionTimer;
+	// Death animation
+	int deathFrame;
+	int deathAnimationCounter;
+	int deathAnimationSpeed;
+};
+struct Enemy {
+	int x;
+	int y;
+	int width;
+	int height;
+	bool active;
+	int currentFrame;
+	int dyingFrame;
+	int animationCounter;
+	int animationSpeed;
+	EnemyState currentState;
+	EnemyDirection facingDirection; // Add direction field
+	EnemyType type; // Type of enemy (Skeleton or Troll or Predator)
+	int hitCount;
+	bool alreadyHit;
+	bool hasBeenDodged;
+	int health;
+	bool collisionCooldown;
+	int collisionTimer;
+	// --- Add Enemy Attack Fields ---
+	bool isAttacking;          // Is the enemy currently attacking?
+	int attackFrame;           // Current frame of the attack animation
+	int attackAnimationCounter; // Counter for attack animation speed
+	int attackAnimationSpeed;   // Speed of the attack animation
+	int attackCooldownCounter;  // Cooldown timer between attacks
+	// -------------------------------
+};
+struct InputState {
+	bool keyPressed[256];
+	bool specialKeyPressed[256];
+};
+struct UIElements {
+	// Button positions and sizes
+	struct Button {
+		int x, y, width, height;
+		bool isHovered;
+	};
+	Button playButton;
+	Button instructionsButton;
+	Button aboutButton;
+	Button exitButton;
+	Button clickButton;
+	Button returnButton;
+};
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              GLOBAL INSTANCES
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+GameState gameState;
+Images images;
+Character character;
+Enemy enemies[MAX_ENEMIES];
+InputState inputState;
+UIElements ui;
+// --- Add Music State Flags ---
+bool isMenuMusicPlaying = false; // Flag to track menu music state
+bool isGameMusicPlaying = false; // Flag to track game music state
+// -----------------------------
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              ANIMATION FUNCTIONS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void updateAnimation()
+{
+	// Handle death animation separately
+	if (character.currentState == STATE_DEATH_ANIM) {
+		character.deathAnimationCounter++;
+		if (character.deathAnimationCounter >= character.deathAnimationSpeed) {
+			character.deathAnimationCounter = 0;
+			character.deathFrame++;
+			if (character.deathFrame >= 4) { // 4 death animation frames
+				character.deathFrame = 3; // Stay on last frame
+				gameState.deathAnimationFinished = true;
+			}
+		}
+		return;
+	}
+	// Handle attack animation separately with faster speed
+	if (character.currentState == STATE_ATTACKING)
+	{
+		character.attackAnimationCounter++;
+		if (character.attackAnimationCounter >= character.attackAnimationSpeed)
+		{
+			character.attackAnimationCounter = 0;
+			character.attackFrame++;
+			// Check if attack animation is complete (5 frames: 0-4)
+			if (character.attackFrame >= 5)
+			{
+				character.isAttacking = false;
+				character.currentState = STATE_IDLE;
+				character.attackFrame = 0;
+				character.currentFrame = 0;
+				// Reset hit flags when attack ends
+				for (int i = 0; i < MAX_ENEMIES; i++) {
+					enemies[i].alreadyHit = false;
+				}
+			}
+		}
+		return; // Don't process other animations during attack
+	}
+	// Regular animation counter for other states
+	character.animationCounter++;
+	if (character.animationCounter >= character.animationSpeed)
+	{
+		character.animationCounter = 0;
+		if (character.currentState == STATE_WALKING)
+		{
+			character.currentFrame = (character.currentFrame + 1) % 8; // 8 walk frames
+		}
+		else if (character.currentState == STATE_RUNNING)
+		{
+			character.currentFrame = (character.currentFrame + 1) % 8; // 8 run frames
+		}
+		else if (character.currentState == STATE_JUMPING)
+		{
+			// Jump animation progresses with jump phases
+			if (character.jumpFrame < 11) // 12 frames total (0-11)
+			{
+				character.currentFrame = character.jumpFrame;
+			}
+		}
+		else if (character.currentState == STATE_DYING)
+		{
+			// Character dying animation
+			character.currentFrame = 0;
+		}
+	}
+}
+void updateEnemyAnimation()
+{
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		if (enemies[i].active) {
+			// Handle attack animation separately if attacking
+			if (enemies[i].isAttacking) {
+				enemies[i].attackAnimationCounter++;
+				if (enemies[i].attackAnimationCounter >= enemies[i].attackAnimationSpeed) {
+					enemies[i].attackAnimationCounter = 0;
+					//int totalAttackFrames = (enemies[i].type == ENEMY_TYPE_SKELETON) ? SKELETON_ATTACK_FRAMES : TROLL_ATTACK_FRAMES;
+					enemies[i].attackFrame++;
+					// Check if attack animation is complete
+					// Use appropriate attack frame count based on enemy type
+					int totalAttackFrames = PREDATOR_ATTACK_FRAMES; // Default to predator
+					if (enemies[i].type == ENEMY_TYPE_SKELETON) {
+						totalAttackFrames = SKELETON_ATTACK_FRAMES;
+					}
+					else if (enemies[i].type == ENEMY_TYPE_TROLL) {
+						totalAttackFrames = TROLL_ATTACK_FRAMES;
+					}
+					else if (enemies[i].type == ENEMY_TYPE_PREDATOR) {
+						totalAttackFrames = PREDATOR_ATTACK_FRAMES;
+					}
+					if (enemies[i].attackFrame >= totalAttackFrames) {
+						enemies[i].isAttacking = false;
+						enemies[i].attackFrame = 0;
+						// Transition back to walking after attack ONLY IF NOT STUNNED
+						// This prevents the enemy from walking after being stunned during attack
+						if (enemies[i].currentState == ENEMY_ATTACKING && enemies[i].hitCount < HITS_TO_STUN) {
+							enemies[i].currentState = ENEMY_WALKING;
+							enemies[i].currentFrame = 0; // Reset walk cycle?
+						}
+						// Start cooldown regardless, but it only matters if state becomes WALKING
+						enemies[i].attackCooldownCounter = ENEMY_ATTACK_COOLDOWN;
+					}
+				}
+				continue; // Skip normal animation updates if attacking
+			}
+			enemies[i].animationCounter++;
+			if (enemies[i].animationCounter >= enemies[i].animationSpeed) {
+				enemies[i].animationCounter = 0;
+				if (enemies[i].type == ENEMY_TYPE_SKELETON) {
+					if (enemies[i].currentState == ENEMY_WALKING) {
+						enemies[i].currentFrame = (enemies[i].currentFrame + 1) % 24; // 24 walk frames
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						// Stunned enemy doesn't animate
+						enemies[i].currentFrame = 0;
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						enemies[i].dyingFrame++;
+						// When dying animation completes, deactivate enemy
+						if (enemies[i].dyingFrame >= 15) {
+							enemies[i].active = false;
+						}
+					}
+				}
+				// --- Apply Level 1 Logic Structure to Level 2 ---
+				else if (enemies[i].type == ENEMY_TYPE_TROLL) {
+					if (enemies[i].currentState == ENEMY_WALKING) {
+						enemies[i].currentFrame = (enemies[i].currentFrame + 1) % 10; // 10 walk frames (000-009)
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						// Stunned enemy doesn't animate
+						enemies[i].currentFrame = 0;
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						enemies[i].dyingFrame++;
+						// When dying animation completes, deactivate enemy
+						// --- Updated Troll Dying Frame Count ---
+						if (enemies[i].dyingFrame >= 10) { // 10 dying frames (000-009)
+							enemies[i].active = false;
+						}
+					}
+				}
+				// --- Apply Level 1 Logic Structure to Level 3 (Predator) ---
+				else if (enemies[i].type == ENEMY_TYPE_PREDATOR) {
+					if (enemies[i].currentState == ENEMY_WALKING) {
+						enemies[i].currentFrame = (enemies[i].currentFrame + 1) % PREDATOR_WALK_FRAMES; // 9 walk frames
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						// Stunned enemy doesn't animate
+						enemies[i].currentFrame = 0;
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						enemies[i].dyingFrame++;
+						// When dying animation completes, deactivate enemy
+						// --- Updated Predator Dying Frame Count ---
+						if (enemies[i].dyingFrame >= PREDATOR_DEATH_FRAMES) { // 5 death frames
+							enemies[i].active = false;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+void updateCharacterState()
+{
+	// Attack state has highest priority
+	if (character.isAttacking)
+	{
+		character.currentState = STATE_ATTACKING;
+		return;
+	}
+	// States are now handled in keyboard functions for single-step movement
+	if (character.isJumping)
+	{
+		character.currentState = STATE_JUMPING;
+	}
+}
+int getCurrentSprite()
+{
+	switch (character.currentState)
+	{
+	case STATE_DEATH_ANIM:
+		return images.deathSprites[character.facingDirection][character.deathFrame];
+	case STATE_IDLE:
+		return images.idleSprite[character.facingDirection];
+	case STATE_WALKING:
+		return images.walkSprites[character.facingDirection][character.currentFrame];
+	case STATE_RUNNING:
+		return images.runSprites[character.facingDirection][character.currentFrame];
+	case STATE_JUMPING:
+		return images.jumpSprites[character.facingDirection][character.currentFrame];
+	case STATE_ATTACKING: // Return attack sprite
+		return images.attackSprites[character.facingDirection][character.attackFrame];
+	case STATE_DYING: // Return dying sprite
+		return images.dyingSprite[character.facingDirection];
+	default:
+		return images.idleSprite[character.facingDirection];
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              GAME FUNCTIONS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void startAttack()
+{
+	// Only allowing attack if on ground and not already attacking or in other actions
+	if (character.onGround && !character.isAttacking && !character.isJumping && !character.isDead)
+	{
+		character.isAttacking = true;
+		character.currentState = STATE_ATTACKING;
+		character.attackFrame = 0;
+		character.attackAnimationCounter = 0;
+		// Reset hit flags when starting new attack
+		for (int i = 0; i < MAX_ENEMIES; i++) {
+			enemies[i].alreadyHit = false;
+		}
+	}
+}
+void startEnemyAttack(int enemyIndex) {
+	// Allow TROLLS and PREDATORS to start attacking
+	if (enemies[enemyIndex].type != ENEMY_TYPE_TROLL && enemies[enemyIndex].type != ENEMY_TYPE_PREDATOR) return;
+	// Prevent attack if stunned or dying
+	if (enemies[enemyIndex].active &&
+		enemies[enemyIndex].currentState != ENEMY_DYING &&
+		enemies[enemyIndex].currentState != ENEMY_STUNNED && // Crucial check
+		!enemies[enemyIndex].isAttacking &&
+		enemies[enemyIndex].attackCooldownCounter <= 0) {
+		enemies[enemyIndex].isAttacking = true;
+		enemies[enemyIndex].attackFrame = 0;
+		enemies[enemyIndex].attackAnimationCounter = 0;
+		enemies[enemyIndex].currentState = ENEMY_ATTACKING; // Set state to attacking
+	}
+}
+// --- UPDATED checkAttackCollision with realistic hitbox ---
+void checkAttackCollision()
+{
+	if (character.currentState == STATE_ATTACKING && character.attackFrame == 2) { // Check at frame 2 of attack
+		// Define a small, more realistic attack hitbox directly in front of the character
+		int hitboxX, hitboxY, hitboxWidth, hitboxHeight;
+		// Define the size and position of the hitbox
+		// These values create a hitbox that is relatively close to the character
+		const int HITBOX_WIDTH = 20;   // Slightly wider for better feel
+		const int HITBOX_HEIGHT = CHARACTER_HEIGHT - 20; // Slightly shorter than character
+		const int HITBOX_OFFSET_X = 10; // Distance from character's edge to start the hitbox
+		const int HITBOX_OFFSET_Y = 10; // Vertical offset to align better
+		if (character.facingDirection == DIRECTION_RIGHT) {
+			// Place hitbox slightly in front of the character's right side
+			hitboxX = character.x + character.width + HITBOX_OFFSET_X;
+			hitboxY = character.y + HITBOX_OFFSET_Y;
+		}
+		else { // DIRECTION_LEFT
+			// Place hitbox slightly in front of the character's left side
+			// hitboxX is the left edge of the hitbox
+			hitboxX = character.x - HITBOX_OFFSET_X - HITBOX_WIDTH;
+			hitboxY = character.y + HITBOX_OFFSET_Y;
+		}
+		// Set the dimensions
+		hitboxWidth = HITBOX_WIDTH;
+		hitboxHeight = HITBOX_HEIGHT;
+		// iSetColor(255, 0, 0);
+		// iRectangle(hitboxX, hitboxY, hitboxWidth, hitboxHeight);
+		// Check collision with each enemy
+		for (int i = 0; i < MAX_ENEMIES; i++) {
+			if (enemies[i].active && enemies[i].currentState != ENEMY_DYING && !enemies[i].alreadyHit) {
+				// Simple rectangle collision detection
+				if (hitboxX < enemies[i].x + enemies[i].width &&
+					hitboxX + hitboxWidth > enemies[i].x &&
+					hitboxY < enemies[i].y + enemies[i].height &&
+					hitboxY + hitboxHeight > enemies[i].y) {
+					// Collision detected - increment hit count
+					enemies[i].hitCount++;
+					enemies[i].alreadyHit = true; // Mark as hit to prevent multiple hits
+					enemies[i].health -= 50; // Reduce enemy health by 50 each hit
+					// First hit stuns the enemy
+					if (enemies[i].hitCount == HITS_TO_STUN) {
+						enemies[i].currentState = ENEMY_STUNNED;
+						// Ensure the enemy stops attacking if hit during attack
+						if (enemies[i].isAttacking) {
+							enemies[i].isAttacking = false;
+							enemies[i].attackFrame = 0;
+						}
+					}
+					// Second hit kills the enemy
+					else if (enemies[i].hitCount >= HITS_TO_KILL || enemies[i].health <= 0) {
+						enemies[i].currentState = ENEMY_DYING;
+						enemies[i].dyingFrame = 0;
+						// Ensure the enemy stops attacking if killed during attack
+						if (enemies[i].isAttacking) {
+							enemies[i].isAttacking = false;
+							enemies[i].attackFrame = 0;
+						}
+						gameState.enemiesKilled++;
+						// Check if level is complete
+						if (gameState.enemiesKilled >= ENEMIES_PER_LEVEL) {
+							gameState.levelComplete = true;
+						}
+					}
+				}
+			}
+		}
+	}
+}
+void checkEnemyAttackCollision() {
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		// Only TROLLS and PREDATORS can attack and cause collision damage
+		// --- Updated Check for Troll/Predator Attack Collision ---
+		// Check if the enemy is a Troll or Predator, active, attacking, and at the specific attack frame (frame 2)
+		if ((enemies[i].type == ENEMY_TYPE_TROLL || enemies[i].type == ENEMY_TYPE_PREDATOR) && enemies[i].active && enemies[i].isAttacking && enemies[i].attackFrame == 2) {
+			// Define attack hitbox based on enemy position and facing direction
+			int attackX, attackY, attackWidth, attackHeight;
+			if (enemies[i].facingDirection == ENEMY_DIRECTION_RIGHT) {
+				attackX = enemies[i].x + enemies[i].width;
+				attackY = enemies[i].y;
+				attackWidth = ENEMY_ATTACK_RANGE; // Use defined attack range (70)
+				attackHeight = enemies[i].height;
+			}
+			else { // ENEMY_DIRECTION_LEFT
+				attackX = enemies[i].x - ENEMY_ATTACK_RANGE; // Fixed calculation
+				attackY = enemies[i].y;
+				attackWidth = ENEMY_ATTACK_RANGE; // Use defined attack range (70)
+				attackHeight = enemies[i].height;
+			}
+			// Check collision with character
+			if (character.x < attackX + attackWidth &&
+				character.x + character.width > attackX &&
+				character.y < attackY + attackHeight &&
+				character.y + character.height > attackY) {
+				// Collision detected - damage character
+				if (!character.collisionCooldown) { // Use character's own cooldown
+					character.health -= ENEMY_ATTACK_DAMAGE;
+					character.collisionCooldown = true;
+					character.collisionTimer = 0;
+					// Check if character is dead
+					if (character.health <= 0) {
+						character.health = 0;
+						character.isDead = true;
+						character.currentState = STATE_DEATH_ANIM; // Start death animation
+						character.deathFrame = 0;
+						character.deathAnimationCounter = 0;
+						gameState.deathAnimationFinished = false;
+						gameState.characterDead = true;
+					}
+				}
+			}
+		}
+	}
+}
+void checkEnemyCollision()
+{
+	if (character.isDead) return;
+	// Update collision cooldown timers
+	if (character.collisionCooldown) {
+		character.collisionTimer++;
+		if (character.collisionTimer > 30) { // 30 frames cooldown
+			character.collisionCooldown = false;
+			character.collisionTimer = 0;
+		}
+	}
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		if (enemies[i].active && enemies[i].currentState != ENEMY_DYING) {
+			// Update enemy collision cooldown
+			if (enemies[i].collisionCooldown) {
+				enemies[i].collisionTimer++;
+				if (enemies[i].collisionTimer > 30) {
+					enemies[i].collisionCooldown = false;
+					enemies[i].collisionTimer = 0;
+				}
+			}
+			// Check collision between character and enemy
+			if (character.x < enemies[i].x + enemies[i].width &&
+				character.x + character.width > enemies[i].x &&
+				character.y < enemies[i].y + enemies[i].height &&
+				character.y + character.height > enemies[i].y) {
+				// Collision detected - reduce character health
+				if (!character.collisionCooldown) {
+					character.health -= COLLISION_DAMAGE; // Reduce 10% health
+					character.collisionCooldown = true;
+					character.collisionTimer = 0;
+					// Enemy also gets cooldown to prevent repeated collisions
+					enemies[i].collisionCooldown = true;
+					enemies[i].collisionTimer = 0;
+					// Check if character is dead
+					if (character.health <= 0) {
+						character.health = 0;
+						character.isDead = true;
+						//character.currentState = STATE_DYING;
+						character.currentState = STATE_DEATH_ANIM; // Start death animation
+						character.deathFrame = 0;
+						character.deathAnimationCounter = 0;
+						gameState.deathAnimationFinished = false;
+						gameState.characterDead = true;
+					}
+				}
+			}
+		}
+	}
+}
+void spawnEnemies()
+{
+	// Reset enemy counters for the level
+	gameState.enemiesSpawnedInLevel = 0;
+	gameState.enemiesKilled = 0;
+	gameState.levelComplete = false;
+	gameState.awaitingLevelProgression = false; // Reset flag
+	gameState.nextEnemyToSpawn = 0; // Initialize nextEnemyToSpawn correctly here
+	// Determine enemy type based on current level
+	EnemyType currentEnemyType = ENEMY_TYPE_SKELETON; // Default
+	if (gameState.currentLevel == LEVEL_1) {
+		currentEnemyType = ENEMY_TYPE_SKELETON;
+	}
+	else if (gameState.currentLevel == LEVEL_2) {
+		currentEnemyType = ENEMY_TYPE_TROLL;
+	}
+	else if (gameState.currentLevel == LEVEL_3) {
+		currentEnemyType = ENEMY_TYPE_PREDATOR;
+	}
+	// Spawn initial wave of enemies
+	int enemiesToSpawn = (ENEMIES_PER_WAVE < ENEMIES_PER_LEVEL) ? ENEMIES_PER_WAVE : ENEMIES_PER_LEVEL;
+	for (int i = 0; i < enemiesToSpawn && gameState.enemiesSpawnedInLevel < ENEMIES_PER_LEVEL; i++) {
+		enemies[i].active = true;
+		enemies[i].x = WINDOW_WIDTH + 200 + (i * 400); // Stagger initial positions
+		enemies[i].y = GROUND_Y;
+		enemies[i].width = ENEMY_WIDTH;
+		enemies[i].height = ENEMY_HEIGHT;
+		enemies[i].currentFrame = 0;
+		enemies[i].dyingFrame = 0;
+		enemies[i].animationCounter = 0;
+		enemies[i].animationSpeed = 5;
+		enemies[i].currentState = ENEMY_WALKING;
+		enemies[i].facingDirection = ENEMY_DIRECTION_LEFT; // Start facing left
+		enemies[i].type = currentEnemyType; // Set enemy type
+		enemies[i].hitCount = 0;
+		enemies[i].alreadyHit = false;
+		enemies[i].hasBeenDodged = false;
+		enemies[i].health = ENEMY_MAX_HEALTH;
+		enemies[i].collisionCooldown = false;
+		enemies[i].collisionTimer = 0;
+		gameState.enemiesSpawnedInLevel++;
+		// gameState.nextEnemyToSpawn = i + 1;
+		gameState.nextEnemyToSpawn++; // Increment correctly
+		// --- Initialize New Enemy Attack Fields ---
+		enemies[i].isAttacking = false;
+		enemies[i].attackFrame = 0;
+		enemies[i].attackAnimationCounter = 0;
+		enemies[i].attackAnimationSpeed = 3; // Adjust as needed
+		enemies[i].attackCooldownCounter = rand() % ENEMY_ATTACK_COOLDOWN; // Random initial cooldown
+	}
+	// Initialize remaining enemies as inactive
+	for (int i = enemiesToSpawn; i < MAX_ENEMIES; i++) {
+		enemies[i].active = false;
+		enemies[i].hitCount = 0;
+		enemies[i].alreadyHit = false;
+		enemies[i].hasBeenDodged = false;
+		enemies[i].health = ENEMY_MAX_HEALTH;
+		enemies[i].collisionCooldown = false;
+		enemies[i].collisionTimer = 0;
+		enemies[i].facingDirection = ENEMY_DIRECTION_LEFT; // Default
+		enemies[i].type = currentEnemyType; // Set enemy type
+		// --- Initialize New Enemy Attack Fields ---
+		enemies[i].isAttacking = false;
+		enemies[i].attackFrame = 0;
+		enemies[i].attackAnimationCounter = 0;
+		enemies[i].attackAnimationSpeed = 3; // Adjust as needed
+		enemies[i].attackCooldownCounter = 0;
+		// ------------------------------------------
+	}
+	gameState.enemiesSpawned = true;
+}
+void updateEnemies()
+{
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		if (enemies[i].active) { // Check active first
+			// Update attack cooldown regardless of state (except maybe DYING?)
+			if (enemies[i].attackCooldownCounter > 0) {
+				enemies[i].attackCooldownCounter--;
+			}
+			// Handle different states
+			if (enemies[i].currentState == ENEMY_DYING) {
+				// Existing DYING logic
+				// ... (keep existing dying animation update code inside updateEnemyAnimation) ...
+			}
+			else if (enemies[i].currentState == ENEMY_STUNNED) {
+				// Existing STUNNED logic
+				// Stunned enemy doesn't move or attack
+				enemies[i].currentFrame = 0; // Keep frame at 0 while stunned?
+				// Ensure enemy is not attacking while stunned
+				if (enemies[i].isAttacking) {
+					enemies[i].isAttacking = false;
+					enemies[i].attackFrame = 0;
+				}
+			}
+			else if (enemies[i].type == ENEMY_TYPE_SKELETON) {
+				// Skeletons never enter ENEMY_ATTACKING state or set isAttacking = true
+				// They just walk towards the character
+				// --- Modified movement logic to maintain reduced distance ---
+				int distanceToCharacter = abs(enemies[i].x - character.x);
+				if (distanceToCharacter > MIN_DISTANCE_TO_CHARACTER) {
+					if (enemies[i].x > character.x + MIN_DISTANCE_TO_CHARACTER) { // Enemy is to the right of character
+						enemies[i].x -= ENEMY_SPEED;
+						enemies[i].facingDirection = ENEMY_DIRECTION_LEFT;
+					}
+					else if (enemies[i].x < character.x - MIN_DISTANCE_TO_CHARACTER) { // Enemy is to the left of character
+						enemies[i].x += ENEMY_SPEED;
+						enemies[i].facingDirection = ENEMY_DIRECTION_RIGHT;
+					}
+				}
+				// Boundary checking - prevent going too far off screen
+				if (enemies[i].x < -50) {
+					enemies[i].x = -50;
+				}
+				else if (enemies[i].x > WINDOW_WIDTH + 50) {
+					enemies[i].x = WINDOW_WIDTH + 50;
+				}
+				enemies[i].currentState = ENEMY_WALKING; // Always walking
+			}
+			else if (enemies[i].type == ENEMY_TYPE_TROLL || enemies[i].type == ENEMY_TYPE_PREDATOR) {
+				// --- Updated Troll/Predator Logic ---
+				// If stunned, do nothing else (handled above)
+				if (enemies[i].currentState == ENEMY_STUNNED) {
+					continue;
+				}
+				// If attacking, check distance to stop if character moves away
+				if (enemies[i].isAttacking) {
+					int distanceToCharacter = abs(enemies[i].x - character.x);
+					if (distanceToCharacter > ENEMY_ATTACK_RANGE + 50) {
+						// Cancel attack if character moves too far away during it
+						enemies[i].isAttacking = false;
+						enemies[i].attackFrame = 0;
+						// Only go back to walking if not stunned (shouldn't happen here, but safe)
+						if (enemies[i].currentState == ENEMY_ATTACKING && enemies[i].hitCount < HITS_TO_STUN) {
+							enemies[i].currentState = ENEMY_WALKING;
+						}
+					}
+					// If still attacking, don't process walking logic
+					continue;
+				}
+				// --- Handle Walking and Potential Attack Initiation ---
+				// This block handles walking AND potential transition to attacking
+				if (enemies[i].currentState == ENEMY_WALKING) {
+					// --- Add Enemy Attack Decision Logic ---
+					// Check distance to character
+					int distanceToCharacter = abs(enemies[i].x - character.x);
+					// --- Use ENEMY_ATTACK_RANGE and ENEMY_ATTACK_COOLDOWN ---
+					// Crucial: Only attack if NOT stunned (hitCount < HITS_TO_STUN)
+					if (distanceToCharacter <= ENEMY_ATTACK_RANGE && // Within attack range
+						enemies[i].attackCooldownCounter <= 0 && // Cooldown expired
+						!enemies[i].isAttacking &&
+						enemies[i].hitCount < HITS_TO_STUN) { // Ensure not stunned
+						// Align enemy facing direction towards character for the attack
+						if (enemies[i].x > character.x + 10) {
+							enemies[i].facingDirection = ENEMY_DIRECTION_LEFT;
+						}
+						else if (enemies[i].x < character.x - 10) {
+							enemies[i].facingDirection = ENEMY_DIRECTION_RIGHT;
+						}
+						// Stop moving and start attack
+						startEnemyAttack(i);
+					}
+					else {
+						// --- Normal Walking Behavior (if not attacking) ---
+						// Move enemy towards character's x position, maintaining reduced distance
+						int distanceToCharacter = abs(enemies[i].x - character.x);
+						if (distanceToCharacter > MIN_DISTANCE_TO_CHARACTER) {
+							if (enemies[i].x > character.x + MIN_DISTANCE_TO_CHARACTER) { // Enemy is to the right of character
+								enemies[i].x -= ENEMY_SPEED;
+								enemies[i].facingDirection = ENEMY_DIRECTION_LEFT; // Face left when moving left
+							}
+							else if (enemies[i].x < character.x - MIN_DISTANCE_TO_CHARACTER) { // Enemy is to the left of character
+								enemies[i].x += ENEMY_SPEED;
+								enemies[i].facingDirection = ENEMY_DIRECTION_RIGHT; // Face right when moving right
+							}
+						}
+						// If enemy is close to character, don't move horizontally but maintain facing direction
+						//enemies[i].currentState = ENEMY_WALKING; // Ensure state is walking if not attacking
+					}
+					// --- End Enemy Attack Decision Logic ---
+					// Boundary checking - prevent going too far off screen
+					if (enemies[i].x < -50) {
+						enemies[i].x = -50;
+					}
+					else if (enemies[i].x > WINDOW_WIDTH + 50) {
+						enemies[i].x = WINDOW_WIDTH + 50;
+					}
+				}
+			}
+		}
+	}
+	// Check if we need to spawn more enemies (wave logic)
+	if (gameState.enemiesSpawned && !gameState.levelComplete) {
+		bool allActiveEnemiesDeadOrDying = true;
+		int activeEnemiesCount = 0;
+		for (int i = 0; i < MAX_ENEMIES; i++) {
+			if (enemies[i].active) {
+				activeEnemiesCount++;
+				if (enemies[i].currentState != ENEMY_DYING) {
+					allActiveEnemiesDeadOrDying = false;
+					break;
+				}
+			}
+		}
+		// If all active enemies are dead/dying and we haven't spawned all enemies for this level
+		if (allActiveEnemiesDeadOrDying && gameState.enemiesSpawnedInLevel < ENEMIES_PER_LEVEL) {
+			// Spawn next wave
+			int enemiesToSpawn = ENEMIES_PER_WAVE;
+			if (gameState.enemiesSpawnedInLevel + enemiesToSpawn > ENEMIES_PER_LEVEL) {
+				enemiesToSpawn = ENEMIES_PER_LEVEL - gameState.enemiesSpawnedInLevel;
+			}
+			for (int i = 0; i < enemiesToSpawn; i++) {
+				// --- FIX: Check if nextEnemyToSpawn is within bounds before activating ---
+				if (gameState.nextEnemyToSpawn < MAX_ENEMIES) {
+					// --- FIX: Activate and initialize the enemy at the nextEnemyToSpawn index ---
+					enemies[gameState.nextEnemyToSpawn].active = true;
+					enemies[gameState.nextEnemyToSpawn].x = WINDOW_WIDTH + 400;
+					enemies[gameState.nextEnemyToSpawn].y = GROUND_Y;
+					enemies[gameState.nextEnemyToSpawn].width = ENEMY_WIDTH;
+					enemies[gameState.nextEnemyToSpawn].height = ENEMY_HEIGHT;
+					enemies[gameState.nextEnemyToSpawn].currentFrame = 0;
+					enemies[gameState.nextEnemyToSpawn].dyingFrame = 0;
+					enemies[gameState.nextEnemyToSpawn].animationCounter = 0;
+					enemies[gameState.nextEnemyToSpawn].animationSpeed = 5;
+					enemies[gameState.nextEnemyToSpawn].currentState = ENEMY_WALKING;
+					enemies[gameState.nextEnemyToSpawn].facingDirection = ENEMY_DIRECTION_LEFT;
+					// Enemy type is already set during initialization
+					enemies[gameState.nextEnemyToSpawn].hitCount = 0;
+					enemies[gameState.nextEnemyToSpawn].alreadyHit = false;
+					enemies[gameState.nextEnemyToSpawn].hasBeenDodged = false;
+					enemies[gameState.nextEnemyToSpawn].health = ENEMY_MAX_HEALTH;
+					enemies[gameState.nextEnemyToSpawn].collisionCooldown = false;
+					enemies[gameState.nextEnemyToSpawn].collisionTimer = 0;
+					// --- Initialize New Enemy Attack Fields for spawned enemy ---
+					enemies[gameState.nextEnemyToSpawn].isAttacking = false;
+					enemies[gameState.nextEnemyToSpawn].attackFrame = 0;
+					enemies[gameState.nextEnemyToSpawn].attackAnimationCounter = 0;
+					enemies[gameState.nextEnemyToSpawn].attackAnimationSpeed = 3; // Adjust as needed
+					enemies[gameState.nextEnemyToSpawn].attackCooldownCounter = rand() % ENEMY_ATTACK_COOLDOWN; // Random initial cooldown
+					// ------------------------------------------------------------
+					gameState.enemiesSpawnedInLevel++;
+					gameState.nextEnemyToSpawn++; // Increment the index for the next potential spawn
+				}
+			}
+		}
+	}
+}
+void updateCharacter()
+{
+	// Don't process movement during attack animation
+	if (character.isAttacking)
+	{
+		updateCharacterState();
+		updateAnimation();
+		checkAttackCollision(); // Check for attack collisions
+		return;
+	}
+	// Check for enemy collision (character takes damage)
+	checkEnemyCollision();
+	// Check for enemy attack collision (character takes damage from enemy attacks)
+	checkEnemyAttackCollision();
+	// Handling regular jump physics
+	if (character.isJumping)
+	{
+		character.y += character.jumpVelocity;
+		character.jumpVelocity -= GRAVITY; // Gravity effect
+		// Updating jump animation frame based on jump progress
+		int jumpProgress = (25 - character.jumpVelocity) / 2;
+		if (jumpProgress < 0) jumpProgress = 0;
+		if (jumpProgress > 11) jumpProgress = 11;
+		character.jumpFrame = jumpProgress;
+		// Checking if landed
+		if (character.y <= GROUND_Y)
+		{
+			character.y = GROUND_Y;
+			character.isJumping = false;
+			character.onGround = true;
+			character.jumpVelocity = 0;
+			character.jumpFrame = 0;
+			character.currentState = STATE_IDLE;
+			character.currentFrame = 0;
+			inputState.keyPressed['w'] = false;
+			inputState.keyPressed['W'] = false;
+			inputState.keyPressed['a'] = false;
+			inputState.keyPressed['A'] = false;
+			inputState.keyPressed['d'] = false;
+			inputState.keyPressed['D'] = false;
+		}
+	}
+	// Updating character state and animations
+	updateCharacterState();
+	// Only update animation for continuous states (jumping)
+	if (character.currentState == STATE_JUMPING)
+	{
+		updateAnimation();
+	}
+	// Update death animation if active
+	if (character.currentState == STATE_DEATH_ANIM) {
+		updateAnimation();
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              HEALTH BAR FUNCTIONS
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void drawCharacterHealthBar()
+{
+	if (character.isDead) return; // Don't draw if character is dead
+	int barWidth = 100;
+	int barHeight = 15;
+	int barX = character.x - 2;
+	int barY = character.y + character.height + 10;
+	// Background (red)
+	iSetColor(255, 0, 0);
+	iFilledRectangle(barX, barY, barWidth, barHeight);
+	// Health (green) - based on current health
+	float healthPercent = (float)character.health / CHARACTER_MAX_HEALTH;
+	iSetColor(0, 255, 0);
+	iFilledRectangle(barX, barY, barWidth * healthPercent, barHeight);
+	// Border
+	iSetColor(0, 0, 0);
+	iRectangle(barX, barY, barWidth, barHeight);
+}
+void drawEnemyHealthBar(int enemyIndex)
+{
+	if (!enemies[enemyIndex].active || enemies[enemyIndex].currentState == ENEMY_DYING) return; // Don't draw if enemy is dead/dying
+	int barWidth = 100;
+	int barHeight = 12;
+	int barX = enemies[enemyIndex].x - 2;
+	int barY = enemies[enemyIndex].y + enemies[enemyIndex].height + 8;
+	// Background (red)
+	iSetColor(255, 0, 0);
+	iFilledRectangle(barX, barY, barWidth, barHeight);
+	// Health (green) - based on current health
+	float healthPercent = (float)enemies[enemyIndex].health / ENEMY_MAX_HEALTH;
+	iSetColor(0, 255, 0);
+	iFilledRectangle(barX, barY, barWidth * healthPercent, barHeight);
+	// Border
+	iSetColor(0, 0, 0);
+	iRectangle(barX, barY, barWidth, barHeight);
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                                  iDraw
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void drawButton(const UIElements::Button& button, int imageId)
+{
+	iShowImage(
+		button.x - (button.isHovered ? 10 : 0),
+		button.y - (button.isHovered ? 10 : 0),
+		button.width + (button.isHovered ? 20 : 0),
+		button.height + (button.isHovered ? 20 : 0),
+		imageId
+		);
+}
+void iDraw()
+{
+	iClear();
+	// Main menu with enhanced hover effects
+	// REMOVED TITLE SCREEN CHECK HERE
+	if (gameState.showMenu) // This now directly checks for the menu
+	{
+		iShowImage(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, images.backGround);
+		drawButton(ui.playButton, images.playButtonImage);
+		drawButton(ui.instructionsButton, images.instructionsButtonImage);
+		drawButton(ui.aboutButton, images.aboutButtonImage);
+		drawButton(ui.exitButton, images.exitButtonImage);
+	}
+	else if (gameState.showInstructions)
+	{
+		iShowImage(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, images.backGround);
+		drawButton(ui.returnButton, images.returnButtonImage);
+		iSetColor(255, 255, 255);
+		iText(50, 500, "INSTRUCTIONS:", GLUT_BITMAP_TIMES_ROMAN_24);
+		iText(50, 470, "A/D: Move left/right", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 440, "W: Jump", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 410, "F: Attack", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 380, "Shift + Movement: Run", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 350, "Backspace: Return to menu", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 320, "ESC: Pause game / Return to menu", GLUT_BITMAP_HELVETICA_18);
+	}
+	else if (gameState.showAbout)
+	{
+		iShowImage(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, images.backGround);
+		drawButton(ui.returnButton, images.returnButtonImage);
+		iSetColor(255, 255, 255);
+		iText(50, 500, "ABOUT US:", GLUT_BITMAP_TIMES_ROMAN_24);
+		iText(50, 470, "Name: Fahim Mubtashim", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 440, "ID: 00724105101147", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 410, "Name: Raiyan Tajuddin Ahmed", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 380, "ID: 00724105101142", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 350, "Name: Sakib Ahmed", GLUT_BITMAP_HELVETICA_18);
+		iText(50, 320, "ID: 00724105101154", GLUT_BITMAP_HELVETICA_18);
+	}
+	else if (gameState.gameStarted)
+	{
+		// Game screen - using level-specific game background
+		iShowImage(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT, images.gameBackGround);
+		// Return button in game screen
+		drawButton(ui.returnButton, images.returnButtonImage);
+		// Drawing enemies
+		for (int i = 0; i < MAX_ENEMIES; i++) {
+			if (enemies[i].active) {
+				int sprite;
+				// Select sprite based on enemy type and state
+				if (enemies[i].type == ENEMY_TYPE_SKELETON) {
+					if (enemies[i].currentState == ENEMY_WALKING) {
+						// Use appropriate sprite based on enemy direction
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyWalkSprites_L1[enemies[i].currentFrame];
+						}
+						else {
+							sprite = images.enemyWalkSpritesRight_L1[enemies[i].currentFrame];
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						sprite = images.enemyStunnedSprite_L1;
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						sprite = images.enemyDyingSprites_L1[enemies[i].dyingFrame];
+					}
+				}
+				else if (enemies[i].type == ENEMY_TYPE_TROLL) {
+					if (enemies[i].currentState == ENEMY_WALKING || enemies[i].isAttacking) {
+						// Use appropriate sprite based on enemy direction
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyWalkSprites_L2[enemies[i].currentFrame]; // Updated array
+						}
+						else {
+							sprite = images.enemyWalkSpritesRight_L2[enemies[i].currentFrame]; // Updated array
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyStunnedSprite_L2_Left; // Updated variable
+						}
+						else {
+							sprite = images.enemyStunnedSprite_L2_Right; // Updated variable
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyDyingSprites_L2_Left[enemies[i].dyingFrame]; // Updated array
+						}
+						else {
+							sprite = images.enemyDyingSprites_L2_Right[enemies[i].dyingFrame]; // Updated array
+						}
+					}
+				}
+				// --- Add Level 3 (Predator) Drawing Logic ---
+				else if (enemies[i].type == ENEMY_TYPE_PREDATOR) {
+					if (enemies[i].currentState == ENEMY_WALKING) {
+						// Use appropriate sprite based on enemy direction
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyWalkSprites_L3[enemies[i].currentFrame]; // Updated array
+						}
+						else {
+							sprite = images.enemyWalkSpritesRight_L3[enemies[i].currentFrame]; // Updated array
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_STUNNED) {
+						// Use appropriate idle sprite based on enemy direction
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyIdleSprite_L3_Left; // Updated variable
+						}
+						else {
+							sprite = images.enemyIdleSprite_L3_Right; // Updated variable
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_DYING) {
+						// Use death sprites for dying state
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyDeathSprites_L3_Left[enemies[i].dyingFrame]; // Updated array
+						}
+						else {
+							sprite = images.enemyDeathSprites_L3_Right[enemies[i].dyingFrame]; // Updated array
+						}
+					}
+					else if (enemies[i].currentState == ENEMY_ATTACKING) {
+						// Use appropriate attack sprite based on enemy direction
+						if (enemies[i].facingDirection == ENEMY_DIRECTION_LEFT) {
+							sprite = images.enemyAttackSprites_L3[enemies[i].attackFrame]; // Updated array
+						}
+						else {
+							sprite = images.enemyAttackSpritesRight_L3[enemies[i].attackFrame]; // Updated array
+						}
+					}
+				}
+				iShowImage(enemies[i].x, enemies[i].y,
+					enemies[i].width, enemies[i].height,
+					sprite);
+				// Draw enemy health bar
+				drawEnemyHealthBar(i);
+			}
+		}
+		// Drawing character with current sprite
+		int currentSprite = getCurrentSprite();
+		iShowImage(character.x, character.y, character.width, character.height, currentSprite);
+		// Draw character health bar
+		drawCharacterHealthBar();
+		// Display game over message if character is dead and animation finished
+		if (gameState.characterDead && gameState.deathAnimationFinished) {
+			iSetColor(255, 0, 0);
+			iText(WINDOW_WIDTH / 2 - 50, WINDOW_HEIGHT / 2, "GAME OVER!", GLUT_BITMAP_TIMES_ROMAN_24);
+			iText(WINDOW_WIDTH / 2 - 100, WINDOW_HEIGHT / 2 - 30, "Press ESC to return to menu", GLUT_BITMAP_HELVETICA_18);
+		}
+		// Display level complete or win message
+		if (gameState.levelComplete && !gameState.characterDead) {
+			if (gameState.currentLevel == LEVEL_3) {
+				// Show win message if on level 3 and complete
+				iSetColor(255, 215, 0); // Gold color
+				iText(WINDOW_WIDTH / 2 - 150, WINDOW_HEIGHT / 2, "CONGRATULATIONS, YOU WON.", GLUT_BITMAP_TIMES_ROMAN_24);
+				iText(WINDOW_WIDTH / 2 - 120, WINDOW_HEIGHT / 2 - 30, "PRESS Esc TO RETURN TO MAIN MENU", GLUT_BITMAP_HELVETICA_18);
+			}
+			else {
+				// Show normal level complete message for level 1 and 2
+				iSetColor(0, 255, 0);
+				iText(WINDOW_WIDTH / 2 - 70, WINDOW_HEIGHT / 2, "LEVEL COMPLETE!", GLUT_BITMAP_TIMES_ROMAN_24);
+				iText(WINDOW_WIDTH / 2 - 120, WINDOW_HEIGHT / 2 - 30, "Press SPACE to continue to next level", GLUT_BITMAP_HELVETICA_18);
+			}
+		}
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              Mouse Handling
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+bool isPointInButton(int mx, int my, const UIElements::Button& button)
+{
+	return mx >= button.x && mx <= button.x + button.width &&
+		my >= button.y && my <= button.y + button.height;
+}
+void resetCharacterToDefault()
+{
+	character.x = 100;
+	character.y = GROUND_Y;
+	character.onGround = true;
+	character.isJumping = false;
+	character.isAttacking = false;
+	character.jumpVelocity = 0;
+	character.currentState = STATE_IDLE;
+	character.currentFrame = 0;
+	character.attackFrame = 0;
+	character.facingDirection = DIRECTION_RIGHT;
+	character.isDead = false;
+	character.health = CHARACTER_MAX_HEALTH;
+	character.collisionCooldown = false;
+	character.collisionTimer = 0;
+	character.deathFrame = 0;
+	character.deathAnimationCounter = 0;
+	character.deathAnimationSpeed = 5; // Adjust speed as needed
+}
+void iMouse(int button, int state, int mx, int my)
+{
+	if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN)
+	{
+		if (gameState.showMenu)
+		{
+			if (isPointInButton(mx, my, ui.playButton))
+			{
+				// --- Stop Menu Music, Start Game Music  ---
+				// Stop the menu music by calling PlaySound with NULL and SND_PURGE
+				// This purges the sound from the system.
+				if (isMenuMusicPlaying) {
+					PlaySound(NULL, NULL, SND_PURGE);
+					isMenuMusicPlaying = false;
+				}
+				// Now play the game music
+				// SND_ASYNC | SND_LOOP | SND_FILENAME
+				if (PlaySound("Music\\Battle Theme II v1.2.wav", NULL, SND_ASYNC | SND_LOOP | SND_FILENAME)) {
+					isGameMusicPlaying = true;
+				}
+				else {
+					// Handle potential error if music file is not found or cannot be played
+					// For simplicity, we'll just set the flag to false if PlaySound fails
+					isGameMusicPlaying = false;
+				}
+				gameState.showMenu = false;
+				gameState.gameStarted = true;
+				gameState.enemiesSpawned = false;
+				gameState.characterDead = false;
+				gameState.currentLevel = LEVEL_1; // Start at level 1
+				resetCharacterToDefault();
+				// Reset enemies
+				for (int i = 0; i < MAX_ENEMIES; i++) {
+					enemies[i].active = false;
+				}
+				// Reset background to level 1 background when starting new game
+				images.gameBackGround = iLoadImage("Images/New Background.jpg");
+			}
+			else if (isPointInButton(mx, my, ui.instructionsButton))
+			{
+				gameState.showMenu = false;
+				gameState.showInstructions = true;
+			}
+			else if (isPointInButton(mx, my, ui.aboutButton))
+			{
+				gameState.showMenu = false;
+				gameState.showAbout = true;
+			}
+			else if (isPointInButton(mx, my, ui.exitButton))
+			{
+				exit(0);
+			}
+		}
+		else if (gameState.showInstructions || gameState.showAbout || gameState.gameStarted)
+		{
+			if (isPointInButton(mx, my, ui.returnButton))
+			{
+				// --- Stop Game Music (if playing), Start Menu Music  ---
+				// Stop the game music
+				if (isGameMusicPlaying) {
+					PlaySound(NULL, NULL, SND_PURGE);
+					isGameMusicPlaying = false;
+				}
+				// Now play the menu music
+				if (PlaySound("Music\\awesomeness.wav", NULL, SND_ASYNC | SND_LOOP | SND_FILENAME)) {
+					isMenuMusicPlaying = true;
+				}
+				else {
+					isMenuMusicPlaying = false;
+				}
+				gameState.showInstructions = false;
+				gameState.showAbout = false;
+				gameState.gameStarted = false;
+				gameState.showMenu = true;
+				gameState.characterDead = false;
+				gameState.deathAnimationFinished = false;
+				gameState.levelComplete = false; // Reset level complete flag
+				gameState.awaitingLevelProgression = false; // Reset progression flag
+			}
+		}
+	}
+}
+// Hover detection
+void iPassiveMouseMove(int mx, int my)
+{
+	// Reset all hover states
+	ui.playButton.isHovered = false;
+	ui.instructionsButton.isHovered = false;
+	ui.aboutButton.isHovered = false;
+	ui.exitButton.isHovered = false;
+	ui.returnButton.isHovered = false;
+	// Hover detection for menu buttons
+	if (gameState.showMenu)
+	{
+		ui.playButton.isHovered = isPointInButton(mx, my, ui.playButton);
+		ui.instructionsButton.isHovered = isPointInButton(mx, my, ui.instructionsButton);
+		ui.aboutButton.isHovered = isPointInButton(mx, my, ui.aboutButton);
+		ui.exitButton.isHovered = isPointInButton(mx, my, ui.exitButton);
+	}
+	// Hover detection for return button
+	if (gameState.showInstructions || gameState.showAbout || gameState.gameStarted)
+	{
+		ui.returnButton.isHovered = isPointInButton(mx, my, ui.returnButton);
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                             Keyboard Handling
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void handleMenuNavigation(unsigned char key)
+{
+	if (key == 8) // Backspace
+	{
+		if (gameState.showInstructions || gameState.showAbout)
+		{
+			gameState.showInstructions = false;
+			gameState.showAbout = false;
+			gameState.showMenu = true;
+		}
+		else if (gameState.gameStarted)
+		{
+			// --- Stop Game Music, Start Menu Music ---
+			// Stop the game music
+			if (isGameMusicPlaying) {
+				PlaySound(NULL, NULL, SND_PURGE);
+				isGameMusicPlaying = false;
+			}
+			// Now play the menu music
+			if (PlaySound("Music\\awesomeness.wav", NULL, SND_ASYNC | SND_LOOP | SND_FILENAME)) {
+				isMenuMusicPlaying = true;
+			}
+			else {
+				isMenuMusicPlaying = false;
+			}
+			gameState.gameStarted = false;
+			gameState.showMenu = true;
+			gameState.characterDead = false;
+			gameState.deathAnimationFinished = false;
+			gameState.levelComplete = false; // Reset level complete flag
+			gameState.awaitingLevelProgression = false; // Reset progression flag
+		}
+	}
+	else if (key == 27) // ESC key
+	{
+		if (gameState.gameStarted)
+		{
+			// --- Stop Game Music, Start Menu Music  ---
+			// Stop the game music
+			if (isGameMusicPlaying) {
+				PlaySound(NULL, NULL, SND_PURGE);
+				isGameMusicPlaying = false;
+			}
+			// Now play the menu music
+			if (PlaySound("Music\\awesomeness.wav", NULL, SND_ASYNC | SND_LOOP | SND_FILENAME)) {
+				isMenuMusicPlaying = true;
+			}
+			else {
+				isMenuMusicPlaying = false;
+			}
+			// -----------------------------------------
+			gameState.gameStarted = false;
+			gameState.showMenu = true;
+			gameState.characterDead = false;
+			gameState.deathAnimationFinished = false;
+			gameState.levelComplete = false; // Reset level complete flag
+			gameState.awaitingLevelProgression = false; // Reset progression flag
+		}
+	}
+	// Handle level progression
+	else if (key == ' ' && gameState.levelComplete && !gameState.characterDead && !gameState.awaitingLevelProgression) {
+		gameState.awaitingLevelProgression = true; // Prevent multiple presses
+		// Check if completing Level 3
+		if (gameState.currentLevel == LEVEL_3) {
+			// Stay on Level 3 and mark game as won
+			// gameState.currentLevel remains LEVEL_3
+			gameState.levelComplete = true; // Keep levelComplete true to show message
+			gameState.enemiesSpawned = false; // Ensure no more enemies spawn
+			// for (int i = 0; i < MAX_ENEMIES; i++) { enemies[i].active = false; }
+		}
+		else {
+			// Move to next level (Level 1 -> Level 2 -> Level 3)
+			gameState.currentLevel++;
+			// Restore character health and position
+			character.health = CHARACTER_MAX_HEALTH;
+			character.isDead = false;
+			character.currentState = STATE_IDLE;
+			character.x = 100; // Reset character position to left side
+			character.facingDirection = DIRECTION_RIGHT; // Reset facing direction
+			// Reset enemy states for the new level
+			gameState.enemiesSpawned = false;
+			gameState.levelComplete = false; // Reset for next level
+			gameState.deathAnimationFinished = false; // Reset death animation flag
+			gameState.awaitingLevelProgression = false; // Reset flag after processing
+			// Change background based on level (only needed when changing level)
+			if (gameState.currentLevel == LEVEL_1) {
+				images.gameBackGround = iLoadImage("Images/New Background.jpg");
+			}
+			else if (gameState.currentLevel == LEVEL_2) {
+				images.gameBackGround = iLoadImage("Images/dead forest.png");
+			}
+			else if (gameState.currentLevel == LEVEL_3) {
+				images.gameBackGround = iLoadImage("Images/dead forest.png"); // Or a new background for level 3
+			}
+		}
+		// Reset awaiting flag if progressing to level 3 or winning
+		if (gameState.currentLevel == LEVEL_3 && !gameState.awaitingLevelProgression) {
+			gameState.awaitingLevelProgression = false; // Reset flag after processing level 3 start or win
+		}
+	}
+}
+void handleGameControls(unsigned char key)
+{
+	// Track key presses only when key is first pressed
+	if (!inputState.keyPressed[key])
+	{
+		inputState.keyPressed[key] = true;
+	}
+	// Don't process movement if attacking, jumping, or character is dead
+	if (character.isAttacking || character.isJumping || character.isDead) return;
+	// Handle attack input (F key)
+	if (key == 'f' || key == 'F')
+	{
+		startAttack();
+		return;
+	}
+	bool shiftPressed = (glutGetModifiers() & GLUT_ACTIVE_SHIFT);
+	int currentSpeed = shiftPressed ? character.runSpeed : character.walkSpeed;
+	// Single key presses
+	if (key == 'a' || key == 'A')
+	{
+		if (character.x > 0)
+		{
+			character.x -= currentSpeed;
+			character.facingDirection = DIRECTION_LEFT;
+			if (shiftPressed)
+			{
+				character.currentState = STATE_RUNNING;
+				character.isRunning = true;
+			}
+			else
+			{
+				character.currentState = STATE_WALKING;
+				character.isRunning = false;
+			}
+			character.currentFrame = (character.currentFrame + 1) % 8;
+		}
+	}
+	else if (key == 'd' || key == 'D')
+	{
+		if (character.x < WINDOW_WIDTH - character.width)
+		{
+			character.x += currentSpeed;
+			character.facingDirection = DIRECTION_RIGHT;
+			if (shiftPressed)
+			{
+				character.currentState = STATE_RUNNING;
+				character.isRunning = true;
+			}
+			else
+			{
+				character.currentState = STATE_WALKING;
+				character.isRunning = false;
+			}
+			character.currentFrame = (character.currentFrame + 1) % 8;
+		}
+	}
+	else if (key == 'w' || key == 'W')
+	{
+		if (character.onGround && !character.isJumping)
+		{
+			character.isJumping = true;
+			character.onGround = false;
+			character.jumpVelocity = JUMP_STRENGTH;
+			character.jumpFrame = 0;
+			character.currentState = STATE_JUMPING;
+		}
+	}
+}
+void iKeyboard(unsigned char key)
+{
+	handleMenuNavigation(key);
+	if (gameState.gameStarted)
+	{
+		handleGameControls(key);
+	}
+}
+void iKeyboardUp(unsigned char key)
+{
+	if (gameState.gameStarted)
+	{
+		inputState.keyPressed[key] = false;
+		// Reset to idle state when key is released
+		if (key == 'a' || key == 'A' || key == 'd' || key == 'D')
+		{
+			// Only reset to idle if not jumping or attacking
+			if (!character.isJumping && !character.isAttacking && !character.isDead)
+			{
+				character.currentState = STATE_IDLE;
+				character.currentFrame = 0;
+				character.isRunning = false;
+			}
+		}
+	}
+}
+void iSpecialKeyboard(unsigned char key) {}
+void iSpecialKeyboardUp(unsigned char key) {}
+void iMouseMove(int mx, int my) {}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                                 TIMER
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void gameTimer()
+{
+	if (gameState.gameStarted && !gameState.characterDead && !gameState.levelComplete)
+	{
+		// Spawn enemies once at the start of the game
+		if (!gameState.enemiesSpawned) {
+			spawnEnemies();
+		}
+		updateCharacter();
+		updateEnemies();
+		updateEnemyAnimation();
+	}
+	// Continue updating death animation even when character is dead
+	else if (gameState.gameStarted && gameState.characterDead && !gameState.deathAnimationFinished) {
+		updateCharacter(); // This will update the death animation
+	}
+	// Continue updating animations even when level is complete but before progression
+	else if (gameState.gameStarted && gameState.levelComplete && !gameState.characterDead) {
+		updateCharacter();
+		updateEnemies();
+		updateEnemyAnimation();
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                              INITIALIZATION
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+void loadAllImages()
+{
+	// Load menu images
+	images.titleImage = iLoadImage("Images/title.png");
+	images.clickImage = iLoadImage("Images/click.png");
+	images.backGround = iLoadImage("Images/bg.png");
+	images.gameBackGround = iLoadImage("Images/New Background.jpg"); // Default to level 1 background
+	images.playButtonImage = iLoadImage("Images/play.png");
+	images.instructionsButtonImage = iLoadImage("Images/instructions.png");
+	images.aboutButtonImage = iLoadImage("Images/about.png");
+	images.exitButtonImage = iLoadImage("Images/exit.png");
+	images.returnButtonImage = iLoadImage("Images/return1.png");
+	// Load character sprites
+	// Idle sprites
+	images.idleSprite[0] = iLoadImage("Images/Idle1.png");
+	images.idleSprite[1] = iLoadImage("Images/Idle1L.png");
+	// Walk sprites - using individual assignments to avoid const char* issues
+	images.walkSprites[0][0] = iLoadImage("Images/Walk1.png");
+	images.walkSprites[0][1] = iLoadImage("Images/Walk2.png");
+	images.walkSprites[0][2] = iLoadImage("Images/Walk3.png");
+	images.walkSprites[0][3] = iLoadImage("Images/Walk4.png");
+	images.walkSprites[0][4] = iLoadImage("Images/Walk5.png");
+	images.walkSprites[0][5] = iLoadImage("Images/Walk6.png");
+	images.walkSprites[0][6] = iLoadImage("Images/Walk7.png");
+	images.walkSprites[0][7] = iLoadImage("Images/Walk8.png");
+	images.walkSprites[1][0] = iLoadImage("Images/Walk1L.png");
+	images.walkSprites[1][1] = iLoadImage("Images/Walk2L.png");
+	images.walkSprites[1][2] = iLoadImage("Images/Walk3L.png");
+	images.walkSprites[1][3] = iLoadImage("Images/Walk4L.png");
+	images.walkSprites[1][4] = iLoadImage("Images/Walk5L.png");
+	images.walkSprites[1][5] = iLoadImage("Images/Walk6L.png");
+	images.walkSprites[1][6] = iLoadImage("Images/Walk7L.png");
+	images.walkSprites[1][7] = iLoadImage("Images/Walk8L.png");
+	// Run sprites
+	images.runSprites[0][0] = iLoadImage("Images/Run1.png");
+	images.runSprites[0][1] = iLoadImage("Images/Run2.png");
+	images.runSprites[0][2] = iLoadImage("Images/Run3.png");
+	images.runSprites[0][3] = iLoadImage("Images/Run4.png");
+	images.runSprites[0][4] = iLoadImage("Images/Run5.png");
+	images.runSprites[0][5] = iLoadImage("Images/Run6.png");
+	images.runSprites[0][6] = iLoadImage("Images/Run7.png");
+	images.runSprites[0][7] = iLoadImage("Images/Run8.png");
+	images.runSprites[1][0] = iLoadImage("Images/Run1L.png");
+	images.runSprites[1][1] = iLoadImage("Images/Run2L.png");
+	images.runSprites[1][2] = iLoadImage("Images/Run3L.png");
+	images.runSprites[1][3] = iLoadImage("Images/Run4L.png");
+	images.runSprites[1][4] = iLoadImage("Images/Run5L.png");
+	images.runSprites[1][5] = iLoadImage("Images/Run6L.png");
+	images.runSprites[1][6] = iLoadImage("Images/Run7L.png");
+	images.runSprites[1][7] = iLoadImage("Images/Run8L.png");
+	// Jump sprites
+	images.jumpSprites[0][0] = iLoadImage("Images/Jump1.png");
+	images.jumpSprites[0][1] = iLoadImage("Images/Jump2.png");
+	images.jumpSprites[0][2] = iLoadImage("Images/Jump3.png");
+	images.jumpSprites[0][3] = iLoadImage("Images/Jump4.png");
+	images.jumpSprites[0][4] = iLoadImage("Images/Jump5.png");
+	images.jumpSprites[0][5] = iLoadImage("Images/Jump6.png");
+	images.jumpSprites[0][6] = iLoadImage("Images/Jump7.png");
+	images.jumpSprites[0][7] = iLoadImage("Images/Jump8.png");
+	images.jumpSprites[0][8] = iLoadImage("Images/Jump9.png");
+	images.jumpSprites[0][9] = iLoadImage("Images/Jump10.png");
+	images.jumpSprites[0][10] = iLoadImage("Images/Jump11.png");
+	images.jumpSprites[0][11] = iLoadImage("Images/Jump12.png");
+	images.jumpSprites[1][0] = iLoadImage("Images/Jump1L.png");
+	images.jumpSprites[1][1] = iLoadImage("Images/Jump2L.png");
+	images.jumpSprites[1][2] = iLoadImage("Images/Jump3L.png");
+	images.jumpSprites[1][3] = iLoadImage("Images/Jump4L.png");
+	images.jumpSprites[1][4] = iLoadImage("Images/Jump5L.png");
+	images.jumpSprites[1][5] = iLoadImage("Images/Jump6L.png");
+	images.jumpSprites[1][6] = iLoadImage("Images/Jump7L.png");
+	images.jumpSprites[1][7] = iLoadImage("Images/Jump8L.png");
+	images.jumpSprites[1][8] = iLoadImage("Images/Jump9L.png");
+	images.jumpSprites[1][9] = iLoadImage("Images/Jump10L.png");
+	images.jumpSprites[1][10] = iLoadImage("Images/Jump11L.png");
+	images.jumpSprites[1][11] = iLoadImage("Images/Jump12L.png");
+	// Attack sprites
+	images.attackSprites[0][0] = iLoadImage("Images/Attack1.png");
+	images.attackSprites[0][1] = iLoadImage("Images/Attack2.png");
+	images.attackSprites[0][2] = iLoadImage("Images/Attack3.png");
+	images.attackSprites[0][3] = iLoadImage("Images/Attack4.png");
+	images.attackSprites[0][4] = iLoadImage("Images/Attack5.png");
+	images.attackSprites[1][0] = iLoadImage("Images/Attack1L.png");
+	images.attackSprites[1][1] = iLoadImage("Images/Attack2L.png");
+	images.attackSprites[1][2] = iLoadImage("Images/Attack3L.png");
+	images.attackSprites[1][3] = iLoadImage("Images/Attack4L.png");
+	images.attackSprites[1][4] = iLoadImage("Images/Attack5L.png");
+	// Dying sprites (single frame)
+	images.dyingSprite[0] = iLoadImage("Images/Dead1.png");
+	images.dyingSprite[1] = iLoadImage("Images/Dead1L.png");
+	// Death animation sprites (4 frames)
+	images.deathSprites[0][0] = iLoadImage("Images/Dead1.png");
+	images.deathSprites[0][1] = iLoadImage("Images/Dead2.png");
+	images.deathSprites[0][2] = iLoadImage("Images/Dead3.png");
+	images.deathSprites[0][3] = iLoadImage("Images/Dead4.png");
+	images.deathSprites[1][0] = iLoadImage("Images/Dead1L.png");
+	images.deathSprites[1][1] = iLoadImage("Images/Dead2L.png");
+	images.deathSprites[1][2] = iLoadImage("Images/Dead3L.png");
+	images.deathSprites[1][3] = iLoadImage("Images/Dead4L.png");
+	// Load enemy walking sprites - Level 1 (Skeletons) (left-facing)
+	images.enemyWalkSprites_L1[0] = iLoadImage("Images/0_Skeleton_Crusader_Walking_000L.png");
+	images.enemyWalkSprites_L1[1] = iLoadImage("Images/0_Skeleton_Crusader_Walking_001L.png");
+	images.enemyWalkSprites_L1[2] = iLoadImage("Images/0_Skeleton_Crusader_Walking_002L.png");
+	images.enemyWalkSprites_L1[3] = iLoadImage("Images/0_Skeleton_Crusader_Walking_003L.png");
+	images.enemyWalkSprites_L1[4] = iLoadImage("Images/0_Skeleton_Crusader_Walking_004L.png");
+	images.enemyWalkSprites_L1[5] = iLoadImage("Images/0_Skeleton_Crusader_Walking_005L.png");
+	images.enemyWalkSprites_L1[6] = iLoadImage("Images/0_Skeleton_Crusader_Walking_006L.png");
+	images.enemyWalkSprites_L1[7] = iLoadImage("Images/0_Skeleton_Crusader_Walking_007L.png");
+	images.enemyWalkSprites_L1[8] = iLoadImage("Images/0_Skeleton_Crusader_Walking_008L.png");
+	images.enemyWalkSprites_L1[9] = iLoadImage("Images/0_Skeleton_Crusader_Walking_009L.png");
+	images.enemyWalkSprites_L1[10] = iLoadImage("Images/0_Skeleton_Crusader_Walking_010L.png");
+	images.enemyWalkSprites_L1[11] = iLoadImage("Images/0_Skeleton_Crusader_Walking_011L.png");
+	images.enemyWalkSprites_L1[12] = iLoadImage("Images/0_Skeleton_Crusader_Walking_012L.png");
+	images.enemyWalkSprites_L1[13] = iLoadImage("Images/0_Skeleton_Crusader_Walking_013L.png");
+	images.enemyWalkSprites_L1[14] = iLoadImage("Images/0_Skeleton_Crusader_Walking_014L.png");
+	images.enemyWalkSprites_L1[15] = iLoadImage("Images/0_Skeleton_Crusader_Walking_015L.png");
+	images.enemyWalkSprites_L1[16] = iLoadImage("Images/0_Skeleton_Crusader_Walking_016L.png");
+	images.enemyWalkSprites_L1[17] = iLoadImage("Images/0_Skeleton_Crusader_Walking_017L.png");
+	images.enemyWalkSprites_L1[18] = iLoadImage("Images/0_Skeleton_Crusader_Walking_018L.png");
+	images.enemyWalkSprites_L1[19] = iLoadImage("Images/0_Skeleton_Crusader_Walking_019L.png");
+	images.enemyWalkSprites_L1[20] = iLoadImage("Images/0_Skeleton_Crusader_Walking_020L.png");
+	images.enemyWalkSprites_L1[21] = iLoadImage("Images/0_Skeleton_Crusader_Walking_021L.png");
+	images.enemyWalkSprites_L1[22] = iLoadImage("Images/0_Skeleton_Crusader_Walking_022L.png");
+	images.enemyWalkSprites_L1[23] = iLoadImage("Images/0_Skeleton_Crusader_Walking_023L.png");
+	// Load enemy walking sprites - Level 1 (Skeletons) (right-facing)
+	images.enemyWalkSpritesRight_L1[0] = iLoadImage("Images/0_Skeleton_Crusader_Walking_000.png");
+	images.enemyWalkSpritesRight_L1[1] = iLoadImage("Images/0_Skeleton_Crusader_Walking_001.png");
+	images.enemyWalkSpritesRight_L1[2] = iLoadImage("Images/0_Skeleton_Crusader_Walking_002.png");
+	images.enemyWalkSpritesRight_L1[3] = iLoadImage("Images/0_Skeleton_Crusader_Walking_003.png");
+	images.enemyWalkSpritesRight_L1[4] = iLoadImage("Images/0_Skeleton_Crusader_Walking_004.png");
+	images.enemyWalkSpritesRight_L1[5] = iLoadImage("Images/0_Skeleton_Crusader_Walking_005.png");
+	images.enemyWalkSpritesRight_L1[6] = iLoadImage("Images/0_Skeleton_Crusader_Walking_006.png");
+	images.enemyWalkSpritesRight_L1[7] = iLoadImage("Images/0_Skeleton_Crusader_Walking_007.png");
+	images.enemyWalkSpritesRight_L1[8] = iLoadImage("Images/0_Skeleton_Crusader_Walking_008.png");
+	images.enemyWalkSpritesRight_L1[9] = iLoadImage("Images/0_Skeleton_Crusader_Walking_009.png");
+	images.enemyWalkSpritesRight_L1[10] = iLoadImage("Images/0_Skeleton_Crusader_Walking_010.png");
+	images.enemyWalkSpritesRight_L1[11] = iLoadImage("Images/0_Skeleton_Crusader_Walking_011.png");
+	images.enemyWalkSpritesRight_L1[12] = iLoadImage("Images/0_Skeleton_Crusader_Walking_012.png");
+	images.enemyWalkSpritesRight_L1[13] = iLoadImage("Images/0_Skeleton_Crusader_Walking_013.png");
+	images.enemyWalkSpritesRight_L1[14] = iLoadImage("Images/0_Skeleton_Crusader_Walking_014.png");
+	images.enemyWalkSpritesRight_L1[15] = iLoadImage("Images/0_Skeleton_Crusader_Walking_015.png");
+	images.enemyWalkSpritesRight_L1[16] = iLoadImage("Images/0_Skeleton_Crusader_Walking_016.png");
+	images.enemyWalkSpritesRight_L1[17] = iLoadImage("Images/0_Skeleton_Crusader_Walking_017.png");
+	images.enemyWalkSpritesRight_L1[18] = iLoadImage("Images/0_Skeleton_Crusader_Walking_018.png");
+	images.enemyWalkSpritesRight_L1[19] = iLoadImage("Images/0_Skeleton_Crusader_Walking_019.png");
+	images.enemyWalkSpritesRight_L1[20] = iLoadImage("Images/0_Skeleton_Crusader_Walking_020.png");
+	images.enemyWalkSpritesRight_L1[21] = iLoadImage("Images/0_Skeleton_Crusader_Walking_021.png");
+	images.enemyWalkSpritesRight_L1[22] = iLoadImage("Images/0_Skeleton_Crusader_Walking_022.png");
+	images.enemyWalkSpritesRight_L1[23] = iLoadImage("Images/0_Skeleton_Crusader_Walking_023.png");
+	// Load enemy stunned sprite - Level 1 (Skeletons)
+	images.enemyStunnedSprite_L1 = iLoadImage("Images/0_Skeleton_Crusader_Idle_000L.png");
+	// Load enemy dying sprites - Level 1 (Skeletons)
+	images.enemyDyingSprites_L1[0] = iLoadImage("Images/0_Skeleton_Crusader_Dying_000L.png");
+	images.enemyDyingSprites_L1[1] = iLoadImage("Images/0_Skeleton_Crusader_Dying_001L.png");
+	images.enemyDyingSprites_L1[2] = iLoadImage("Images/0_Skeleton_Crusader_Dying_002L.png");
+	images.enemyDyingSprites_L1[3] = iLoadImage("Images/0_Skeleton_Crusader_Dying_003L.png");
+	images.enemyDyingSprites_L1[4] = iLoadImage("Images/0_Skeleton_Crusader_Dying_004L.png");
+	images.enemyDyingSprites_L1[5] = iLoadImage("Images/0_Skeleton_Crusader_Dying_005L.png");
+	images.enemyDyingSprites_L1[6] = iLoadImage("Images/0_Skeleton_Crusader_Dying_006L.png");
+	images.enemyDyingSprites_L1[7] = iLoadImage("Images/0_Skeleton_Crusader_Dying_007L.png");
+	images.enemyDyingSprites_L1[8] = iLoadImage("Images/0_Skeleton_Crusader_Dying_008L.png");
+	images.enemyDyingSprites_L1[9] = iLoadImage("Images/0_Skeleton_Crusader_Dying_009L.png");
+	images.enemyDyingSprites_L1[10] = iLoadImage("Images/0_Skeleton_Crusader_Dying_010L.png");
+	images.enemyDyingSprites_L1[11] = iLoadImage("Images/0_Skeleton_Crusader_Dying_011L.png");
+	images.enemyDyingSprites_L1[12] = iLoadImage("Images/0_Skeleton_Crusader_Dying_012L.png");
+	images.enemyDyingSprites_L1[13] = iLoadImage("Images/0_Skeleton_Crusader_Dying_013L.png");
+	images.enemyDyingSprites_L1[14] = iLoadImage("Images/0_Skeleton_Crusader_Dying_014L.png");
+	// Load enemy attack sprites - Level 1 (Skeletons) (left-facing)
+	images.enemyAttackSprites_L1[0] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_000L.png");
+	images.enemyAttackSprites_L1[1] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_001L.png");
+	images.enemyAttackSprites_L1[2] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_002L.png");
+	images.enemyAttackSprites_L1[3] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_003L.png");
+	images.enemyAttackSprites_L1[4] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_004L.png");
+	images.enemyAttackSprites_L1[5] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_005L.png");
+	images.enemyAttackSprites_L1[6] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_006L.png");
+	images.enemyAttackSprites_L1[7] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_007L.png");
+	images.enemyAttackSprites_L1[8] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_008L.png");
+	images.enemyAttackSprites_L1[9] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_009L.png");
+	images.enemyAttackSprites_L1[10] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_010L.png");
+	images.enemyAttackSprites_L1[11] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_011L.png");
+	// Load enemy attack sprites - Level 1 (Skeletons) (right-facing)
+	images.enemyAttackSpritesRight_L1[0] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_000.png");
+	images.enemyAttackSpritesRight_L1[1] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_001.png");
+	images.enemyAttackSpritesRight_L1[2] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_002.png");
+	images.enemyAttackSpritesRight_L1[3] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_003.png");
+	images.enemyAttackSpritesRight_L1[4] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_004.png");
+	images.enemyAttackSpritesRight_L1[5] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_005.png");
+	images.enemyAttackSpritesRight_L1[6] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_006.png");
+	images.enemyAttackSpritesRight_L1[7] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_007.png");
+	images.enemyAttackSpritesRight_L1[8] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_008.png");
+	images.enemyAttackSpritesRight_L1[9] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_009.png");
+	images.enemyAttackSpritesRight_L1[10] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_010.png");
+	images.enemyAttackSpritesRight_L1[11] = iLoadImage("Images/0_Skeleton_Crusader_Slashing_011.png");
+	// Load enemy walking sprites - Level 2 (Trolls) (left-facing)
+	// --- Updated Troll Walking Sprite Loading (000L to 009L) ---
+	images.enemyWalkSprites_L2[0] = iLoadImage("Images/Troll_02_1_WALK_000L.png");
+	images.enemyWalkSprites_L2[1] = iLoadImage("Images/Troll_02_1_WALK_001L.png");
+	images.enemyWalkSprites_L2[2] = iLoadImage("Images/Troll_02_1_WALK_002L.png");
+	images.enemyWalkSprites_L2[3] = iLoadImage("Images/Troll_02_1_WALK_003L.png");
+	images.enemyWalkSprites_L2[4] = iLoadImage("Images/Troll_02_1_WALK_004L.png");
+	images.enemyWalkSprites_L2[5] = iLoadImage("Images/Troll_02_1_WALK_005L.png");
+	images.enemyWalkSprites_L2[6] = iLoadImage("Images/Troll_02_1_WALK_006L.png");
+	images.enemyWalkSprites_L2[7] = iLoadImage("Images/Troll_02_1_WALK_007L.png");
+	images.enemyWalkSprites_L2[8] = iLoadImage("Images/Troll_02_1_WALK_008L.png");
+	images.enemyWalkSprites_L2[9] = iLoadImage("Images/Troll_02_1_WALK_009L.png");
+	// ------------------------------------------------------------
+	// Load enemy walking sprites - Level 2 (Trolls) (right-facing)
+	// --- Updated Troll Walking Sprite Loading (000 to 009) ---
+	images.enemyWalkSpritesRight_L2[0] = iLoadImage("Images/Troll_02_1_WALK_000.png");
+	images.enemyWalkSpritesRight_L2[1] = iLoadImage("Images/Troll_02_1_WALK_001.png");
+	images.enemyWalkSpritesRight_L2[2] = iLoadImage("Images/Troll_02_1_WALK_002.png");
+	images.enemyWalkSpritesRight_L2[3] = iLoadImage("Images/Troll_02_1_WALK_003.png");
+	images.enemyWalkSpritesRight_L2[4] = iLoadImage("Images/Troll_02_1_WALK_004.png");
+	images.enemyWalkSpritesRight_L2[5] = iLoadImage("Images/Troll_02_1_WALK_005.png");
+	images.enemyWalkSpritesRight_L2[6] = iLoadImage("Images/Troll_02_1_WALK_006.png");
+	images.enemyWalkSpritesRight_L2[7] = iLoadImage("Images/Troll_02_1_WALK_007.png");
+	images.enemyWalkSpritesRight_L2[8] = iLoadImage("Images/Troll_02_1_WALK_008.png");
+	images.enemyWalkSpritesRight_L2[9] = iLoadImage("Images/Troll_02_1_WALK_009.png");
+	// -----------------------------------------------------------
+	// Load enemy stunned sprite - Level 2 (Trolls)
+	// --- Updated Troll Stunned Sprite Loading ---
+	images.enemyStunnedSprite_L2_Left = iLoadImage("Images/Troll_02_1_IDLE_000L.png"); // Left-facing
+	images.enemyStunnedSprite_L2_Right = iLoadImage("Images/Troll_02_1_IDLE_000.png"); // Right-facing
+	// ---------------------------------------------
+	// Load enemy dying sprites - Level 2 (Trolls) (left-facing)
+	// --- Updated Troll Dying Sprite Loading (000L to 009L) ---
+	images.enemyDyingSprites_L2_Left[0] = iLoadImage("Images/Troll_02_1_DIE_000L.png");
+	images.enemyDyingSprites_L2_Left[1] = iLoadImage("Images/Troll_02_1_DIE_001L.png");
+	images.enemyDyingSprites_L2_Left[2] = iLoadImage("Images/Troll_02_1_DIE_002L.png");
+	images.enemyDyingSprites_L2_Left[3] = iLoadImage("Images/Troll_02_1_DIE_003L.png");
+	images.enemyDyingSprites_L2_Left[4] = iLoadImage("Images/Troll_02_1_DIE_004L.png");
+	images.enemyDyingSprites_L2_Left[5] = iLoadImage("Images/Troll_02_1_DIE_005L.png");
+	images.enemyDyingSprites_L2_Left[6] = iLoadImage("Images/Troll_02_1_DIE_006L.png");
+	images.enemyDyingSprites_L2_Left[7] = iLoadImage("Images/Troll_02_1_DIE_007L.png");
+	images.enemyDyingSprites_L2_Left[8] = iLoadImage("Images/Troll_02_1_DIE_008L.png");
+	images.enemyDyingSprites_L2_Left[9] = iLoadImage("Images/Troll_02_1_DIE_009L.png");
+	// ----------------------------------------------------------
+	// Load enemy dying sprites - Level 2 (Trolls) (right-facing)
+	// --- Updated Troll Dying Sprite Loading (000 to 009) ---
+	images.enemyDyingSprites_L2_Right[0] = iLoadImage("Images/Troll_02_1_DIE_000.png");
+	images.enemyDyingSprites_L2_Right[1] = iLoadImage("Images/Troll_02_1_DIE_001.png");
+	images.enemyDyingSprites_L2_Right[2] = iLoadImage("Images/Troll_02_1_DIE_002.png");
+	images.enemyDyingSprites_L2_Right[3] = iLoadImage("Images/Troll_02_1_DIE_003.png");
+	images.enemyDyingSprites_L2_Right[4] = iLoadImage("Images/Troll_02_1_DIE_004.png");
+	images.enemyDyingSprites_L2_Right[5] = iLoadImage("Images/Troll_02_1_DIE_005.png");
+	images.enemyDyingSprites_L2_Right[6] = iLoadImage("Images/Troll_02_1_DIE_006.png");
+	images.enemyDyingSprites_L2_Right[7] = iLoadImage("Images/Troll_02_1_DIE_007.png");
+	images.enemyDyingSprites_L2_Right[8] = iLoadImage("Images/Troll_02_1_DIE_008.png");
+	images.enemyDyingSprites_L2_Right[9] = iLoadImage("Images/Troll_02_1_DIE_009.png");
+	// ---------------------------------------------------------
+	// Load enemy attack sprites - Level 2 (Trolls) (left-facing)
+	// --- Updated Troll Attack Sprite Loading (000L to 009L) ---
+	images.enemyAttackSprites_L2[0] = iLoadImage("Images/Troll_02_1_ATTACK_000L.png");
+	images.enemyAttackSprites_L2[1] = iLoadImage("Images/Troll_02_1_ATTACK_001L.png");
+	images.enemyAttackSprites_L2[2] = iLoadImage("Images/Troll_02_1_ATTACK_002L.png");
+	images.enemyAttackSprites_L2[3] = iLoadImage("Images/Troll_02_1_ATTACK_003L.png");
+	images.enemyAttackSprites_L2[4] = iLoadImage("Images/Troll_02_1_ATTACK_004L.png");
+	images.enemyAttackSprites_L2[5] = iLoadImage("Images/Troll_02_1_ATTACK_005L.png");
+	images.enemyAttackSprites_L2[6] = iLoadImage("Images/Troll_02_1_ATTACK_006L.png");
+	images.enemyAttackSprites_L2[7] = iLoadImage("Images/Troll_02_1_ATTACK_007L.png");
+	images.enemyAttackSprites_L2[8] = iLoadImage("Images/Troll_02_1_ATTACK_008L.png");
+	images.enemyAttackSprites_L2[9] = iLoadImage("Images/Troll_02_1_ATTACK_009L.png");
+	// ----------------------------------------------------------
+	// Load enemy attack sprites - Level 2 (Trolls) (right-facing)
+	// --- Updated Troll Attack Sprite Loading (000 to 009) ---
+	images.enemyAttackSpritesRight_L2[0] = iLoadImage("Images/Troll_02_1_ATTACK_000.png");
+	images.enemyAttackSpritesRight_L2[1] = iLoadImage("Images/Troll_02_1_ATTACK_001.png");
+	images.enemyAttackSpritesRight_L2[2] = iLoadImage("Images/Troll_02_1_ATTACK_002.png");
+	images.enemyAttackSpritesRight_L2[3] = iLoadImage("Images/Troll_02_1_ATTACK_003.png");
+	images.enemyAttackSpritesRight_L2[4] = iLoadImage("Images/Troll_02_1_ATTACK_004.png");
+	images.enemyAttackSpritesRight_L2[5] = iLoadImage("Images/Troll_02_1_ATTACK_005.png");
+	images.enemyAttackSpritesRight_L2[6] = iLoadImage("Images/Troll_02_1_ATTACK_006.png");
+	images.enemyAttackSpritesRight_L2[7] = iLoadImage("Images/Troll_02_1_ATTACK_007.png");
+	images.enemyAttackSpritesRight_L2[8] = iLoadImage("Images/Troll_02_1_ATTACK_008.png");
+	images.enemyAttackSpritesRight_L2[9] = iLoadImage("Images/Troll_02_1_ATTACK_009.png");
+	// ---------------------------------------------------------
+	// --- Load Level 3 (Predator) Sprites ---
+	// Load enemy idle sprite - Level 3 (Predators)
+	images.enemyIdleSprite_L3_Left = iLoadImage("Images/predatormask__0000_idle_1L.png"); // Left-facing
+	images.enemyIdleSprite_L3_Right = iLoadImage("Images/predatormask__0000_idle_1.png"); // Right-facing
+
+	// Load enemy walking sprites - Level 3 (Predators) (left-facing)
+	images.enemyWalkSprites_L3[0] = iLoadImage("Images/predatormask__0003_turn_1L.png");
+	images.enemyWalkSprites_L3[1] = iLoadImage("Images/predatormask__0003_turn_2L.png");
+	images.enemyWalkSprites_L3[2] = iLoadImage("Images/predatormask__0003_turn_3L.png");
+	images.enemyWalkSprites_L3[3] = iLoadImage("Images/predatormask__0006_walk_1L.png");
+	images.enemyWalkSprites_L3[4] = iLoadImage("Images/predatormask__0006_walk_2L.png");
+	images.enemyWalkSprites_L3[5] = iLoadImage("Images/predatormask__0006_walk_3L.png");
+	images.enemyWalkSprites_L3[6] = iLoadImage("Images/predatormask__0006_walk_4L.png");
+	images.enemyWalkSprites_L3[7] = iLoadImage("Images/predatormask__0006_walk_5L.png");
+	images.enemyWalkSprites_L3[8] = iLoadImage("Images/predatormask__0006_walk_6L.png");
+
+	// Load enemy walking sprites - Level 3 (Predators) (right-facing)
+	images.enemyWalkSpritesRight_L3[0] = iLoadImage("Images/predatormask__0003_turn_1.png");
+	images.enemyWalkSpritesRight_L3[1] = iLoadImage("Images/predatormask__0003_turn_2.png");
+	images.enemyWalkSpritesRight_L3[2] = iLoadImage("Images/predatormask__0003_turn_3.png");
+	images.enemyWalkSpritesRight_L3[3] = iLoadImage("Images/predatormask__0006_walk_1.png");
+	images.enemyWalkSpritesRight_L3[4] = iLoadImage("Images/predatormask__0006_walk_2.png");
+	images.enemyWalkSpritesRight_L3[5] = iLoadImage("Images/predatormask__0006_walk_3.png");
+	images.enemyWalkSpritesRight_L3[6] = iLoadImage("Images/predatormask__0006_walk_4.png");
+	images.enemyWalkSpritesRight_L3[7] = iLoadImage("Images/predatormask__0006_walk_5.png");
+	images.enemyWalkSpritesRight_L3[8] = iLoadImage("Images/predatormask__0006_walk_6.png");
+
+	// Load enemy death sprites - Level 3 (Predators) (left-facing)
+	images.enemyDeathSprites_L3_Left[0] = iLoadImage("Images/predatormask__0022_dead_1L.png");
+	images.enemyDeathSprites_L3_Left[1] = iLoadImage("Images/predatormask__0022_dead_2L.png");
+	images.enemyDeathSprites_L3_Left[2] = iLoadImage("Images/predatormask__0022_dead_3L.png");
+	images.enemyDeathSprites_L3_Left[3] = iLoadImage("Images/predatormask__0022_dead_4L.png");
+	images.enemyDeathSprites_L3_Left[4] = iLoadImage("Images/predatormask__0022_dead_5L.png");
+
+	// Load enemy death sprites - Level 3 (Predators) (right-facing)
+	images.enemyDeathSprites_L3_Right[0] = iLoadImage("Images/predatormask__0022_dead_1.png");
+	images.enemyDeathSprites_L3_Right[1] = iLoadImage("Images/predatormask__0022_dead_2.png");
+	images.enemyDeathSprites_L3_Right[2] = iLoadImage("Images/predatormask__0022_dead_3.png");
+	images.enemyDeathSprites_L3_Right[3] = iLoadImage("Images/predatormask__0022_dead_4.png");
+	images.enemyDeathSprites_L3_Right[4] = iLoadImage("Images/predatormask__0022_dead_5.png");
+
+	// Load enemy attack sprites - Level 3 (Predators) (left-facing)
+	images.enemyAttackSprites_L3[0] = iLoadImage("Images/predatormask__0031_attack_1L.png");
+	images.enemyAttackSprites_L3[1] = iLoadImage("Images/predatormask__0031_attack_2L.png");
+	images.enemyAttackSprites_L3[2] = iLoadImage("Images/predatormask__0031_attack_3L.png");
+	images.enemyAttackSprites_L3[3] = iLoadImage("Images/predatormask__0031_attack_4L.png");
+
+	// Load enemy attack sprites - Level 3 (Predators) (right-facing)
+	images.enemyAttackSpritesRight_L3[0] = iLoadImage("Images/predatormask__0031_attack_1.png");
+	images.enemyAttackSpritesRight_L3[1] = iLoadImage("Images/predatormask__0031_attack_2.png");
+	images.enemyAttackSpritesRight_L3[2] = iLoadImage("Images/predatormask__0031_attack_3.png");
+	images.enemyAttackSpritesRight_L3[3] = iLoadImage("Images/predatormask__0031_attack_4.png");
+	// ---------------------------------------------------------
+}
+void initializeGameState()
+{
+	// Start directly at the menu
+	gameState.showMenu = true; // CHANGED THIS FROM false TO true
+	gameState.showInstructions = false;
+	gameState.showAbout = false;
+	gameState.gameStarted = false;
+	gameState.enemiesSpawned = false;
+	gameState.enemiesKilled = 0;
+	gameState.nextEnemyToSpawn = 0;
+	gameState.characterDead = false;
+	gameState.characterHealth = CHARACTER_MAX_HEALTH;
+	gameState.currentLevel = LEVEL_1;
+	gameState.enemiesSpawnedInLevel = 0;
+	gameState.levelComplete = false;
+	gameState.awaitingLevelProgression = false;
+	gameState.deathAnimationFinished = false;
+}
+void initializeCharacter()
+{
+	character.x = 100;
+	character.y = GROUND_Y;
+	character.width = CHARACTER_WIDTH;
+	character.height = CHARACTER_HEIGHT;
+	character.walkSpeed = WALK_SPEED;
+	character.runSpeed = RUN_SPEED;
+	character.facingDirection = DIRECTION_RIGHT;
+	character.moveLeft = false;
+	character.moveRight = false;
+	character.isRunning = false;
+	character.isJumping = false;
+	character.isAttacking = false;
+	character.onGround = true;
+	character.isDead = false;
+	character.currentState = STATE_IDLE;
+	character.currentFrame = 0;
+	character.animationCounter = 0;
+	character.animationSpeed = 5;
+	character.attackFrame = 0;
+	character.attackAnimationCounter = 0;
+	character.attackAnimationSpeed = 3;
+	character.jumpVelocity = 0;
+	character.jumpFrame = 0;
+	character.health = CHARACTER_MAX_HEALTH;
+	character.collisionCooldown = false;
+	character.collisionTimer = 0;
+	character.deathFrame = 0;
+	character.deathAnimationCounter = 0;
+	character.deathAnimationSpeed = 5; // Adjust speed as needed
+}
+void initializeEnemies()
+{
+	for (int i = 0; i < MAX_ENEMIES; i++) {
+		enemies[i].active = false;
+		enemies[i].x = 0;
+		enemies[i].y = GROUND_Y;
+		enemies[i].width = ENEMY_WIDTH;
+		enemies[i].height = ENEMY_HEIGHT;
+		enemies[i].currentFrame = 0;
+		enemies[i].dyingFrame = 0;
+		enemies[i].animationCounter = 0;
+		enemies[i].animationSpeed = 5;
+		enemies[i].currentState = ENEMY_WALKING;
+		enemies[i].facingDirection = ENEMY_DIRECTION_LEFT; // Default
+		enemies[i].type = ENEMY_TYPE_SKELETON; // Default to skeleton
+		enemies[i].hitCount = 0;
+		enemies[i].alreadyHit = false;
+		enemies[i].hasBeenDodged = false;
+		enemies[i].health = ENEMY_MAX_HEALTH;
+		enemies[i].collisionCooldown = false;
+		enemies[i].collisionTimer = 0;
+		// --- Initialize New Enemy Attack Fields ---
+		enemies[i].isAttacking = false;
+		enemies[i].attackFrame = 0;
+		enemies[i].attackAnimationCounter = 0;
+		enemies[i].attackAnimationSpeed = 3; // Adjust as needed
+		enemies[i].attackCooldownCounter = 0;
+		// ------------------------------------------
+	}
+}
+void initializeUI()
+{
+	ui.playButton.x = 100;
+	ui.playButton.y = 360;
+	ui.playButton.width = 200;
+	ui.playButton.height = 60;
+	ui.playButton.isHovered = false;
+	ui.instructionsButton.x = 100;
+	ui.instructionsButton.y = 290;
+	ui.instructionsButton.width = 200;
+	ui.instructionsButton.height = 60;
+	ui.instructionsButton.isHovered = false;
+	ui.aboutButton.x = 100;
+	ui.aboutButton.y = 220;
+	ui.aboutButton.width = 200;
+	ui.aboutButton.height = 60;
+	ui.aboutButton.isHovered = false;
+	ui.exitButton.x = 100;
+	ui.exitButton.y = 150;
+	ui.exitButton.width = 200;
+	ui.exitButton.height = 60;
+	ui.exitButton.isHovered = false;
+	ui.clickButton.x = 400;
+	ui.clickButton.y = 0;
+	ui.clickButton.width = 0;
+	ui.clickButton.height = 0;
+	ui.clickButton.isHovered = false;
+	ui.returnButton.x = 20;
+	ui.returnButton.y = 530;
+	ui.returnButton.width = 75;
+	ui.returnButton.height = 75;
+	ui.returnButton.isHovered = false;
+}
+void initializeInputState()
+{
+	for (int i = 0; i < 256; i++)
+	{
+		inputState.keyPressed[i] = false;
+		inputState.specialKeyPressed[i] = false;
+	}
+}
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+//                                   MAIN
+//::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+int main()
+{
+	srand(time(NULL)); // Initialize random seed
+	iInitialize(WINDOW_WIDTH, WINDOW_HEIGHT, "Dawn Reborn");
+	// Initialize all game systems
+	initializeGameState();
+	initializeCharacter();
+	initializeUI();
+	initializeInputState();
+	initializeEnemies();
+	loadAllImages();
+	// --- Start Playing Initial Menu Music  ---
+	// This plays the menu music asynchronously and loops it.
+	// SND_ASYNC | SND_LOOP | SND_FILENAME
+	if (PlaySound("Music\\awesomeness.wav", NULL, SND_ASYNC | SND_LOOP | SND_FILENAME)) {
+		isMenuMusicPlaying = true;
+	}
+	else {
+		// Handle potential error if music file is not found or cannot be played
+		isMenuMusicPlaying = false;
+	}
+	// -------------------------------
+	// Set up game timer
+	iSetTimer(20, gameTimer);
+	iStart();
+	return 0;
+}
