@@ -2,7 +2,7 @@
 
 ## Game Description
 
-**Dawn Reborn: From Ashes to Glory** is a 2D action-adventure game built using the iGraphics library in C++. The project showcases a complete gameplay loop, featuring character animation, enemy AI, multiple levels, and a final boss battle. The player must fight their way through hordes of enemies to restore glory.
+**Dawn Reborn: From Ashes to Glory** is a 2D action-adventure game built using the iGraphics library in C++. The project showcases a complete gameplay loop, featuring character animation, enemy NPC, multiple levels, and a final boss battle. The player must fight their way through hordes of enemies to restore glory.
 
 ## Features
 - **Animated Character**: Play with a character that can walk, run, jump, and attack.
@@ -88,7 +88,7 @@ Open the project in Visual Studio 2013
 
 
 ## Youtube Link
-[CSE 1200 Project: Dawn Reborn: From Ashes to Glory](https://www.youtube.com/)
+[CSE 1200 Project: Dawn Reborn: From Ashes to Glory](https://youtu.be/U3iZJlWpTtc)
 
 ## Project Report
-[Project Report: Dawn Reborn: From Ashes to Glory](https://drive.google.com/drive/u/1/my-drive)
+[Project Report: Dawn Reborn: From Ashes to Glory](https://drive.google.com/file/d/1UxyPO-vij7mOtjtOK7XQIkk0RkJ9gTSQ/view?usp=sharing)
